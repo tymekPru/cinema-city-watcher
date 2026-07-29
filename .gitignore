@@ -1,0 +1,21 @@
+# stan i konfiguracja lokalna
+state.json
+state.json.tmp
+.env
+
+# python
+__pycache__/
+*.pyc
+.venv/
+
+# artefakty budowania
+build/
+*.zip
+
+# terraform
+.terraform/
+terraform.tfstate*
+*.tfvars
+
+# local documentation
+DEVOPS-PLAN.md
