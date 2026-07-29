@@ -1,123 +1,154 @@
-# cc-watcher — ticket watcher for Cinema City (CZ)
+# cc-watcher — Cinema City ticket watcher (CZ)
 
-Cinema City showtime watcher (start: czech version, Praha Flora IMAX)
-Checks for available spots for movies and sends an email notification
+Cinema City showtime watcher for the Czech Republic, initially configured for
+the IMAX auditorium at Cinema City Praha Flora. It monitors ticket availability
+for selected films and sends email notifications when matching screenings or
+new seats become available.
 
-<<<<<<< HEAD
-## Configuration
-=======
-## Jak to działa (ustalenia o API — 2026-07-29)
+## How it works
 
-Cinema City ma nieoficjalne, publiczne JSON API repertuaru (to samo, z którego
-korzysta ich strona). Baza dla Czech (tenant `10101`):
+Cinema City exposes an unofficial public JSON API for showtime data—the same API
+used by its website. The base URL for the Czech tenant (`10101`) is:
 
-```
+```text
 https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/
 ```
 
-Kluczowe endpointy (wszystkie zwykłe GET, bez autoryzacji):
+The main endpoints are regular `GET` requests and require no authentication:
 
-| Endpoint | Co daje |
+| Endpoint | Description |
 |---|---|
-| `cinemas/with-event/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | lista kin (Praha Flora = `1052`) |
-| `films/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | lista filmów (Odyssea = `7268s2r`) |
-| `film-events/in-cinema/{cinemaId}/at-date/{YYYY-MM-DD}?attr=&lang=cs_CZ` | filmy + seanse danego dnia |
-| `dates/in-cinema/{cinemaId}/until/{YYYY-MM-DD}?attr=70-mm&lang=cs_CZ` | dni, w których są pasujące seanse — jednym requestem |
-| `attributes?lang=cs_CZ` | katalog wszystkich atrybutów (słownik `attributeIds`) |
+| `cinemas/with-event/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Lists cinemas with events; Praha Flora has ID `1052` |
+| `films/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Lists films; for example, *Odyssea* has ID `7268s2r` |
+| `film-events/in-cinema/{cinemaId}/at-date/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Returns films and screenings for a cinema on a specific date |
+| `dates/in-cinema/{cinemaId}/until/{YYYY-MM-DD}?attr=70-mm&lang=cs_CZ` | Returns dates with matching screenings in a single request |
+| `attributes?lang=cs_CZ` | Returns the complete attribute catalogue used by `attributeIds` |
 
-Filtr `attr=` działa **po stronie serwera**, ale wiele wartości łączy się jak **OR**
-(nie AND) — dlatego serwerowo wysyłamy jeden atrybut (zawężenie), a resztę
-dociskamy u siebie. `dates/...` + `attr=70-mm` zbija przebieg z ~46 requestów do ~6.
+The `attr` filter is applied server-side, but multiple values are often combined
+using **OR**, not **AND**. The watcher therefore sends one attribute to the API
+to narrow the result set and applies any remaining filters locally. Using the
+`dates/...` endpoint with `attr=70-mm` reduces a typical scan from approximately
+46 requests to approximately 6.
 
-## Do wyklikania w Postmanie
+## Testing the API with Postman
 
-Trzy zapytania, od których warto zacząć (zwykły GET, bez nagłówków, bez auth):
+Start with these three requests. They require no headers or authentication:
 
-```
+```http
 GET https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/dates/in-cinema/1052/until/2026-09-30?attr=70-mm&lang=cs_CZ
 GET https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/film-events/in-cinema/1052/at-date/2026-08-01?attr=70-mm&lang=cs_CZ
 GET https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/attributes?lang=cs_CZ
 ```
 
-W drugim szukaj w `body.events[]` pól `soldOut`, `availabilityRatio`, `auditorium`
-i `bookingRouterLaunchLink` — na tych czterech stoi cały watcher.
+In the second response, inspect the following fields in `body.events[]`:
+`soldOut`, `availabilityRatio`, `auditorium`, and
+`bookingRouterLaunchLink`. These fields provide all the information needed by
+the watcher:
 
-Obiekt seansu (event) zawiera **wszystko, czego potrzebujemy**:
+- `soldOut` indicates whether the screening is sold out.
+- `availabilityRatio` represents the proportion of available seats, with a
+  resolution of approximately one seat.
+- `attributeIds` contains screening attributes such as `70-mm` for 70 mm
+  screenings in the `IMAX VOLVO` auditorium.
+- `bookingRouterLaunchLink` provides a working direct link to ticket sales:
 
-- `soldOut` (bool) i `availabilityRatio` (ułamek wolnych miejsc, rozdzielczość ~1 miejsca),
-- `attributeIds` — m.in. `70-mm` (seanse 70mm w sali „IMAX VOLVO"),
-- `bookingRouterLaunchLink` — działający deep link do zakupu:
-  `https://www.cinemacity.cz/cz/booking-router/launch/{eventId}?lang=cs`.
+  ```text
+  https://www.cinemacity.cz/cz/booking-router/launch/{eventId}?lang=cs
+  ```
 
-Uwaga: pole `bookingLink` (`tickets.cinemacity.cz/api/order/...`) jest **martwe**
-(w `compositeBookingLink` figuruje jako `obsoleteBookingUrl` i zwraca 404).
-Właściwy system rezerwacji to `tickets.rel.cinemacity.cz`.
+The `bookingLink` field, which points to
+`tickets.cinemacity.cz/api/order/...`, is obsolete and returns HTTP 404. It also
+appears as `obsoleteBookingUrl` inside `compositeBookingLink`. The current
+booking system uses `tickets.rel.cinemacity.cz`.
 
-### Detekcja (trzy sygnały)
+## Detection rules
 
-1. **NOWY SEANS** — pojawił się pasujący seans, którego nie było (środowe dropy nowych terminów).
-2. **POWRÓT BILETÓW** — seans przeszedł z `soldOut=true` na `false`.
-3. **NOWE MIEJSCA** — `availabilityRatio` wzrósł o próg (domyślnie ~1 miejsce).
-   Liczymy **przyrost względem ostatniego stanu**, więc miejsca wiszące wolne od zawsze
-   (np. dla wózków) nie robią fałszywych alarmów — alarmuje dopiero zmiana.
+The watcher detects three types of events:
 
-Pierwszy przebieg tylko inicjalizuje stan (bez lawiny alertów). Wszystkie alerty
-z jednego przebiegu idą w jednym mailu. Cooldown na parę (seans, typ alertu).
+1. **New screening** — a matching screening appears for the first time, for
+   example after the weekly schedule is published.
+2. **Tickets available again** — a screening changes from `soldOut=true` to
+   `soldOut=false`.
+3. **More seats available** — `availabilityRatio` increases by at least the
+   configured threshold, which defaults to approximately one seat.
 
-### Kiedy wpadają bilety (ustalenia z researchu)
+Seat increases are calculated relative to the most recently stored state.
+Seats that have always been available, such as wheelchair-accessible spaces,
+therefore do not cause repeated false alarms; only an actual change triggers an
+alert.
 
-**We wtorki przed południem** — nie w środy. Czeskie kina programują „tydzień kinowy"
-czwartek → środa, a sprzedaż na kolejny tydzień otwiera się w poprzedzający wtorek rano
-(Forbes.cz, kinomaniak.cz). Środa to ostatni dzień tygodnia kinowego, stąd wrażenie,
-że „już nic nie ma". Dokładna godzina nie jest nigdzie publikowana (tylko „dopoledne"),
-więc tryb intensywny warto trzymać od ~6:30. Horyzont sprzedaży to zwykle ~1 tydzień.
+The first run only initializes the state and does not send alerts. All events
+detected during a single run are grouped into one email. A cooldown is applied
+separately to each screening and alert type.
 
-Kontekst: Flora to jedno z 3 kin w UE z prawdziwą projekcją 15/70mm (obok Brukseli
-i Montpellier). Seanse 70mm schodzą w godziny, pojemność sali IMAX VOLVO = **385 miejsc**
-(wyliczone z rozdzielczości `availabilityRatio`: 1 miejsce = 1/385 ≈ 0.0026).
+## When tickets are released
 
-### Uwagi o atrybutach
+Research indicates that tickets are usually released **on Tuesday mornings**,
+not on Wednesdays. Czech cinemas schedule their cinema week from Thursday
+through Wednesday, and sales for the following week generally open on the
+preceding Tuesday morning. The exact time is not publicly documented, so the
+intensive polling window should start at approximately 06:30. The usual sales
+horizon is approximately one week.
 
-- Seanse IMAX w czeskim tenantcie **nie mają** atrybutu `imax` (jest w słowniku, ale nie
-  występuje na żadnym evencie) — rozpoznajemy je po `70-mm` oraz `auditorium` = `IMAX VOLVO`.
-- `attributeIds` na poziomie **filmu** są zagregowane po wszystkich seansach w całej sieci —
-  do filtrowania nadają się tylko te na poziomie **eventu**.
-- `businessDay` ≠ data kalendarzowa: seans o 00:20 należy do dnia poprzedniego.
+Praha Flora is one of three cinemas in the European Union capable of genuine
+15/70 mm projection, alongside cinemas in Brussels and Montpellier. Its `IMAX
+VOLVO` auditorium has an estimated capacity of **385 seats**, calculated from
+the resolution of `availabilityRatio`:
 
-### Ograniczenia
+```text
+1 seat = 1 / 385 ≈ 0.0026
+```
 
-- **Mapa sali (konkretne rzędy / miejsca dla wózków)**: system rezerwacji siedzi za
-  agresywnym Cloudflare bot-protection — nie automatyzujemy tego (blokady + ToS).
-  W praktyce wystarcza delta `availabilityRatio` + deep link: klikasz z maila
-  i w 5 sekund widzisz mapę sali w przeglądarce. Filtr rzędów = ewentualny etap 2.
-- API repertuaru traktujemy grzecznie: przerwy między requestami, uczciwy User-Agent,
-  jeden przebieg = `HORIZON_DAYS + 1` requestów.
+## Attribute notes
 
-## Szybki start (lokalnie, zero zależności — czysty Python 3.11+)
+- IMAX screenings in the Czech tenant do **not** include the `imax` attribute.
+  Although it exists in the attribute catalogue, it does not appear on events.
+  The watcher identifies relevant screenings using `70-mm` and
+  `auditorium = IMAX VOLVO`.
+- Film-level `attributeIds` are aggregated across all screenings in the entire
+  cinema network. Only event-level attributes are suitable for filtering.
+- `businessDay` is not always equal to the calendar date. For example, a
+  screening at 00:20 belongs to the previous business day.
+
+## Limitations
+
+- **Seat map and specific rows:** The booking system is protected by aggressive
+  Cloudflare bot protection, so the watcher does not automate seat-map access.
+  The `availabilityRatio` delta and direct booking link are sufficient for the
+  current workflow: open the email link to inspect the seat map in a browser.
+  Row-level filtering may be added later.
+- **Responsible API usage:** The watcher uses delays between requests and an
+  honest `User-Agent`. Each scan performs one request for matching dates and
+  one additional request for each date returned by the API.
+
+## Quick start
+
+The local runner requires only Python 3.11 or newer:
 
 ```bash
 cd src
-python local_run.py --once          # jeden przebieg (inicjalizuje state.json)
-python local_run.py --interval 60   # pętla co 60 s, alerty na konsolę
+python local_run.py --once          # Run once and initialize state.json
+python local_run.py --interval 60   # Poll every 60 seconds and print alerts
 ```
 
-## Konfiguracja (zmienne środowiskowe)
->>>>>>> 28194c2 (download optimalization)
+## Configuration
 
-| Zmienna | Domyślnie | Opis |
+Configuration is provided through environment variables:
+
+| Variable | Default | Description |
 |---|---|---|
-| `CINEMA_ID` | `1052` | kino (Praha Flora) |
-| `FILM_ID` | – | dokładne id filmu (np. `7268s2r`); ma pierwszeństwo |
-| `FILM_MATCH` | `odys` | fragment nazwy filmu |
-| `REQUIRED_ATTRS` | `70-mm` | wymagane atrybuty seansu (CSV); puste = wszystkie |
-| `HORIZON_DAYS` | `45` | ile dni do przodu skanować |
-| `MIN_RATIO_DELTA` | `0.002` | próg przyrostu wolnych miejsc (1 miejsce = 0.0026) |
-| `CAPACITY` | `385` | pojemność sali (IMAX VOLVO) — alerty pokażą liczbę miejsc; `0` = pokaż % |
-| `ALERT_COOLDOWN_MIN` | `15` | cisza po alercie danego typu dla seansu |
-| `INTENSIVE` | `false` | Lambda: pętla wewnętrzna do końca timeoutu (środy) |
-| `INTENSIVE_INTERVAL_S` | `15` | odstęp przebiegów w trybie intensywnym |
-| `STATE_BACKEND` | `file` | `file` \| `dynamodb` |
-| `STATE_FILE` / `DDB_TABLE` | `state.json` / `cc-watcher-state` | magazyn stanu |
-| `NOTIFY_BACKEND` | `console` | `console` \| `ses` |
-| `SES_FROM` / `SES_TO` | – | nadawca / odbiorcy (CSV) dla SES |
-| `WATCHER_AWS_REGION` | `eu-central-1` | region AWS |
+| `CINEMA_ID` | `1052` | Cinema ID; defaults to Praha Flora |
+| `FILM_ID` | — | Exact film ID, for example `7268s2r`; takes precedence over `FILM_MATCH` |
+| `FILM_MATCH` | `odys` | Case-insensitive fragment of the film title |
+| `REQUIRED_ATTRS` | `70-mm` | Required event attributes as CSV; leave empty to accept all screenings |
+| `HORIZON_DAYS` | `45` | Number of days to scan ahead |
+| `MIN_RATIO_DELTA` | `0.002` | Minimum increase in available seats; one seat is approximately `0.0026` |
+| `CAPACITY` | `385` | Auditorium capacity used to display seat counts; set to `0` to display percentages |
+| `ALERT_COOLDOWN_MIN` | `15` | Cooldown in minutes per screening and alert type |
+| `INTENSIVE` | `false` | For AWS Lambda, poll repeatedly until the timeout; intended for Tuesday ticket releases |
+| `INTENSIVE_INTERVAL_S` | `15` | Delay between scans in intensive mode |
+| `STATE_BACKEND` | `file` | State backend: `file` or `dynamodb` |
+| `STATE_FILE` / `DDB_TABLE` | `state.json` / `cc-watcher-state` | File path or DynamoDB table used to store state |
+| `NOTIFY_BACKEND` | `console` | Notification backend: `console` or `ses` |
+| `SES_FROM` / `SES_TO` | — | SES sender and comma-separated recipients |
+| `WATCHER_AWS_REGION` | `eu-central-1` | AWS region |
