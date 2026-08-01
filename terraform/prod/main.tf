@@ -2,16 +2,6 @@ provider "aws" {
   region = "eu-central-1"
 }
 
-# Create bucket for tfstate
-resource "aws_s3_bucket" "terraform_state" {
-  bucket = "cc-watcher-tfstate-bucket"
-
-  # Prevent accidental deletion of this S3 bucket
-  lifecycle {
-    prevent_destroy = true
-  }
-}
-
 # Create dynamodb table
 resource "aws_dynamodb_table" "cc-watcher-state" {
   name           = "cc-watcher-state"
@@ -78,7 +68,7 @@ data "aws_iam_policy_document" "ses_policy" {
 }
 resource "aws_iam_policy" "ses_policy" {
   name   = "SendEmailToMeSES"
-  policy = data.aws_iam_policy_document.dynamodb_policy.json
+  policy = data.aws_iam_policy_document.ses_policy.json
 }
 resource "aws_iam_role_policy_attachment" "ses_policy" {
   role       = aws_iam_role.role.name
@@ -87,7 +77,7 @@ resource "aws_iam_role_policy_attachment" "ses_policy" {
 
 # Create Lambda
 resource "aws_lambda_function" "py_lambda" {
-  filename      = "../build/lambda.zip"
+  filename      = "../../build/lambda.zip"
   function_name = "CinemaCityWatcher"
   role          = aws_iam_role.role.arn
   handler       = "lambda_handler.handler"
@@ -101,7 +91,7 @@ resource "aws_lambda_function" "py_lambda" {
     variables = {
       CAPACITY           = 385
       CINEMA_ID          = 1052
-      DDB_TABLE          = cc-watcher-state
+      DDB_TABLE          = "cc-watcher-state"
       FILM_ID            = "7268s2r"
       FILM_MATCH         = "odys"
       HORIZON_DAYS       = 45
