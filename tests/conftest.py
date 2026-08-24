@@ -1,5 +1,5 @@
 import sys
 from pathlib import Path
 
-# testy odpalamy z katalogu repo: "import watcher" ma dzialac bez instalacji pakietu
+# Tests run from the repository root: make "import watcher" work without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))

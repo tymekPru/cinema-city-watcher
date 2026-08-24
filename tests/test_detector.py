@@ -1,4 +1,4 @@
-"""Testy detektora. Uruchomienie z katalogu repo:  pytest -q"""
+"""Detector tests. Run from the repository root:  pytest -q"""
 
 import copy
 from datetime import datetime, timedelta
@@ -7,16 +7,16 @@ import pytest
 
 from watcher.detector import _PRAGUE, Detector
 
-FILM = {"id": "7268s2r", "name": "Odyseja"}
+FILM = {"id": "7268s2r", "name": "Odyssey"}
 
 
 def _today():
-    """Ta sama strefa co w kodzie — inaczej test bywa flaky w okolicach polnocy."""
+    """Same timezone as the code under test, otherwise this is flaky around midnight."""
     return datetime.now(_PRAGUE).date()
 
 
 class Cfg:
-    """Minimalna konfiguracja — tylko pola, ktorych uzywa Detector."""
+    """Minimal configuration: only the fields Detector actually reads."""
 
     cinema_id = "1052"
     film_id = "7268s2r"
@@ -31,7 +31,7 @@ class Cfg:
 
 
 class FakeApi:
-    """Oddaje kolejne partie seansow — jedna partia na jeden sweep()."""
+    """Serves one batch of screenings per sweep() call."""
 
     def __init__(self, batches):
         self.batches = list(batches)
@@ -47,7 +47,7 @@ class FakeApi:
 
 
 class FakeState:
-    """Stan w pamieci; kopiuje przy load/save, zeby test nie dzielil obiektow z kodem."""
+    """In-memory state; copies on load/save so the test never shares objects with the code."""
 
     def __init__(self, data=None):
         self.data = copy.deepcopy(data) if data else {}
@@ -76,24 +76,24 @@ def detector(batches, state=None):
     return Detector(FakeApi(batches), state or FakeState(), Cfg())
 
 
-def test_pierwszy_przebieg_zapamietuje_bez_alertow():
+def test_first_sweep_records_state_without_alerting():
     det = detector([[event(ratio=0.05)]])
 
     assert det.sweep() == []
     assert det.state.data["events"]["e1"]["ratio"] == pytest.approx(0.05)
 
 
-def test_nowy_seans_po_wygasnieciu_wszystkich_znanych_daje_alert():
-    """Regresja: wtorkowy drop po tym, jak stare seanse sie odbyly.
+def test_new_screening_alerts_after_every_known_one_has_expired():
+    """Regression: the Tuesday drop, once the previously known screenings have played.
 
-    Sprzatanie usuwa z pamieci seanse z przeszlosci, wiec mapa zdarzen robi sie
-    pusta. Detektor NIE moze uznac takiego przebiegu za pierwszy — inaczej caly
-    nowy tydzien wchodzi po cichu i nie leci zaden mail.
+    Pruning removes screenings that are in the past, so the event map goes empty. A sweep
+    starting from that state must not be treated as a first run - otherwise the entire new
+    week of screenings is absorbed silently and no mail is ever sent.
     """
-    po_sprzataniu = {"events": {}, "last_sweep": "2026-08-24T06:00:00+00:00"}
-    det = detector([[event(eid="nowy", ratio=0.9)]], state=FakeState(po_sprzataniu))
+    after_pruning = {"events": {}, "last_sweep": "2026-08-24T06:00:00+00:00"}
+    det = detector([[event(eid="new", ratio=0.9)]], state=FakeState(after_pruning))
 
-    alerty = det.sweep()
+    alerts = det.sweep()
 
-    assert len(alerty) == 1
-    assert "NOWY SEANS" in alerty[0]
+    assert len(alerts) == 1
+    assert "NOWY SEANS" in alerts[0]
