@@ -77,13 +77,14 @@ resource "aws_iam_role_policy_attachment" "ses_policy" {
 
 # Create Lambda
 resource "aws_lambda_function" "py_lambda" {
-  filename      = "../../build/lambda.zip"
-  function_name = "CinemaCityWatcher"
-  role          = aws_iam_role.role.arn
-  handler       = "lambda_handler.handler"
-  runtime       = "python3.12"
-  memory_size   = 256
-  timeout       = 55
+  filename         = "../../build/lambda.zip"
+  source_code_hash = filebase64sha256("${path.module}/../../build/lambda.zip")
+  function_name    = "CinemaCityWatcher"
+  role             = aws_iam_role.role.arn
+  handler          = "lambda_handler.handler"
+  runtime          = "python3.12"
+  memory_size      = 256
+  timeout          = 55
 
   architectures = ["arm64"]
 
