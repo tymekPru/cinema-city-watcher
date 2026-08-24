@@ -63,7 +63,7 @@ data "aws_iam_policy_document" "ses_policy" {
   statement {
     effect    = "Allow"
     actions   = ["ses:SendEmail"]
-    resources = ["arn:aws:ses:eu-central-1:000000000000:identity/alerts@example.com"]
+    resources = ["arn:aws:ses:${data.aws_region.current}:${data.aws_caller_identity.current}:identity/${var.alert_email}"]
   }
 }
 resource "aws_iam_policy" "ses_policy" {
@@ -97,8 +97,8 @@ resource "aws_lambda_function" "py_lambda" {
       HORIZON_DAYS       = 45
       NOTIFY_BACKEND     = "ses"
       REQUIRED_ATTRS     = "70-mm"
-      SES_FROM           = "alerts@example.com"
-      SES_TO             = "alerts@example.com"
+      SES_FROM           = var.alert_email
+      SES_TO             = var.alert_email
       STATE_BACKEND      = "dynamodb"
       WATCHER_AWS_REGION = "eu-central-1"
     }
@@ -140,7 +140,7 @@ data "aws_iam_policy_document" "lambda_trigger_policy" {
   statement {
     effect    = "Allow"
     actions   = ["lambda:InvokeFunction"]
-    resources = ["arn:aws:lambda:eu-central-1:000000000000:function:CinemaCityWatcher"]
+    resources = [aws_lambda_function.py_lambda.arn]
   }
 }
 resource "aws_iam_policy" "lambda_trigger_policy" {
