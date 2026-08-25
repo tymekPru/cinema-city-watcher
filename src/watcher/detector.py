@@ -93,8 +93,13 @@ class Detector:
         sold_out = bool(ev.get("soldOut"))
         now = datetime.now(timezone.utc)
         prev = known.get(eid)
+        prev_ratio = float((prev or {}).get("ratio") or 0.0)
         known[eid] = {
-            "ratio": ratio,
+            # Comparison baseline for the next sweep. It only moves UP when an alert is
+            # actually sent (see the end of this method); otherwise a rise swallowed by the
+            # cooldown - or one too small to alert on its own - would be forgotten. It moves
+            # DOWN as soon as seats are sold, so tickets coming back are still noticed.
+            "ratio": ratio if prev is None else min(prev_ratio, ratio),
             "soldOut": sold_out,
             "when": ev.get("eventDateTime"),
             "seen": (prev or {}).get("seen") or now.isoformat(),
@@ -108,13 +113,14 @@ class Detector:
             kind, extra = "NOWY SEANS", ""
         elif prev.get("soldOut") and not sold_out and ratio >= self.cfg.min_ratio_delta:
             kind, extra = "POWRÓT BILETÓW", ""
-        elif ratio - float(prev.get("ratio") or 0.0) >= self.cfg.min_ratio_delta:
-            kind, extra = "NOWE MIEJSCA", f" (+{self._seats(ratio - float(prev.get('ratio') or 0.0))})"
+        elif ratio - prev_ratio >= self.cfg.min_ratio_delta:
+            kind, extra = "NOWE MIEJSCA", f" (+{self._seats(ratio - prev_ratio)})"
         else:
             return None
 
         if not self._cooldown_ok(rec, kind, now):
             return None
+        rec["ratio"] = ratio
         rec["alerts"][kind] = now.isoformat()
         when = (ev.get("eventDateTime") or "")[:16].replace("T", " ")
         return (
