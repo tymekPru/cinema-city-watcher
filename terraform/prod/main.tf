@@ -63,7 +63,7 @@ data "aws_iam_policy_document" "ses_policy" {
   statement {
     effect    = "Allow"
     actions   = ["ses:SendEmail"]
-    resources = ["arn:aws:ses:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:identity/${var.alert_email}"]
+    resources = ["arn:aws:ses:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:identity/${var.alert_email}"]
   }
 }
 resource "aws_iam_policy" "ses_policy" {
@@ -128,7 +128,7 @@ resource "aws_iam_role" "scheduler_role" {
       Condition = {
         StringEquals = {
           "aws:SourceAccount" = data.aws_caller_identity.current.account_id
-          "aws:SourceArn"     = "arn:aws:scheduler:${data.aws_region.current.name}:${data.aws_caller_identity.current.account_id}:schedule-group/default"
+          "aws:SourceArn"     = "arn:aws:scheduler:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:schedule-group/default"
         }
       }
     }]
