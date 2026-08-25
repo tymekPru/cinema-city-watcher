@@ -2,7 +2,7 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 6.00"
+      version = "~> 6.0"
     }
     archive = {
       source  = "hashicorp/archive"
@@ -18,5 +18,5 @@ terraform {
     use_lockfile = true
   }
 
-  required_version = ">= 1.2"
+  required_version = ">= 1.11"
 }
