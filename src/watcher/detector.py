@@ -58,7 +58,7 @@ class Detector:
         """Jeden przebieg po dniach z seansami. Zwraca listę alertów (tekstów)."""
         data = self.state.load()
         known = data.setdefault("events", {})
-        first_run = not known
+        first_run = "last_sweep" not in data
         alerts: list[str] = []
         today = datetime.now(_PRAGUE).date()
 
