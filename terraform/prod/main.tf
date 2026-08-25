@@ -76,9 +76,14 @@ resource "aws_iam_role_policy_attachment" "ses_policy" {
 }
 
 # Create Lambda
+data "archive_file" "lambda" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../src"
+  output_path = "${path.module}/../../build/lambda.zip"
+}
 resource "aws_lambda_function" "py_lambda" {
-  filename         = "../../build/lambda.zip"
-  source_code_hash = filebase64sha256("${path.module}/../../build/lambda.zip")
+  filename         = data.archive_file.lambda.output_path
+  source_code_hash = data.archive_file.lambda.output_base64sha256
   function_name    = "CinemaCityWatcher"
   role             = aws_iam_role.role.arn
   handler          = "lambda_handler.handler"
