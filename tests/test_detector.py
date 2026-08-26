@@ -7,7 +7,11 @@ import pytest
 
 from watcher.detector import _PRAGUE, Detector
 
-FILM = {"id": "7268s2r", "name": "Odyssey"}
+FILM = {
+    "id": "7268s2r",
+    "name": "Odyssey",
+    "link": "https://www.cinemacity.cz/films/odyssea/7268s2r",
+}
 
 
 def _today():
@@ -59,8 +63,8 @@ class FakeState:
         self.data = copy.deepcopy(data)
 
 
-def event(eid="e1", ratio=0.0, days_ahead=3):
-    return {
+def event(eid="e1", ratio=0.0, days_ahead=3, booking_link=None):
+    payload = {
         "id": eid,
         "filmId": FILM["id"],
         "attributeIds": ["70-mm"],
@@ -70,6 +74,9 @@ def event(eid="e1", ratio=0.0, days_ahead=3):
         + "T20:00:00",
         "auditorium": "IMAX VOLVO",
     }
+    if booking_link is not None:
+        payload["bookingRouterLaunchLink"] = booking_link
+    return payload
 
 
 def detector(batches, state=None, **cfg_overrides):
@@ -157,3 +164,33 @@ def test_baseline_drops_when_seats_are_sold():
 
     assert len(det.sweep()) == 0
     assert len(det.sweep()) == 1
+
+
+def test_alert_uses_the_booking_link_the_api_returns():
+    """Their booking URL scheme has changed before; prefer the field over our template."""
+    api_link = "https://www.cinemacity.cz/cz/booking-router/launch/999999?lang=cs"
+    det = detector(
+        [[event(ratio=0.9, booking_link=api_link)]],
+        state=state_with(0.0),
+    )
+
+    alert = det.sweep()[0]
+
+    assert api_link in alert
+
+
+def test_alert_falls_back_to_the_built_link_when_the_field_is_missing():
+    det = detector([[event(eid="e1", ratio=0.9)]], state=state_with(0.0))
+
+    alert = det.sweep()[0]
+
+    assert "booking-router/launch/e1" in alert
+
+
+def test_alert_also_links_the_film_page():
+    """The booking link hands off to the ticketing system; the film page always opens."""
+    det = detector([[event(ratio=0.9)]], state=state_with(0.0))
+
+    alert = det.sweep()[0]
+
+    assert FILM["link"] in alert
