@@ -59,11 +59,19 @@ resource "aws_iam_role_policy_attachment" "dynamodb_policy" {
 }
 
 # 3. SES sending email to me policy
+import {
+  to = aws_ses_email_identity.alert_email
+  id = var.alert_email
+}
+
+resource "aws_ses_email_identity" "alert_email" {
+  email = var.alert_email
+}
 data "aws_iam_policy_document" "ses_policy" {
   statement {
     effect    = "Allow"
     actions   = ["ses:SendEmail"]
-    resources = ["arn:aws:ses:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:identity/${var.alert_email}"]
+    resources = [aws_ses_email_identity.alert_email.arn]
   }
 }
 resource "aws_iam_policy" "ses_policy" {

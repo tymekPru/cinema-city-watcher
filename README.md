@@ -16,13 +16,13 @@ https://www.cinemacity.cz/cz/data-api-service/v1/quickbook/10101/
 
 The main endpoints are regular `GET` requests and require no authentication:
 
-| Endpoint | Description |
-|---|---|
-| `cinemas/with-event/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Lists cinemas with events; Praha Flora has ID `1052` |
-| `films/until/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Lists films; for example, *Odyssea* has ID `7268s2r` |
-| `film-events/in-cinema/{cinemaId}/at-date/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Returns films and screenings for a cinema on a specific date |
-| `dates/in-cinema/{cinemaId}/until/{YYYY-MM-DD}?attr=70-mm&lang=cs_CZ` | Returns dates with matching screenings in a single request |
-| `attributes?lang=cs_CZ` | Returns the complete attribute catalogue used by `attributeIds` |
+| Endpoint                                                                 | Description                                                     |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------- |
+| `cinemas/with-event/until/{YYYY-MM-DD}?attr=&lang=cs_CZ`                 | Lists cinemas with events; Praha Flora has ID `1052`            |
+| `films/until/{YYYY-MM-DD}?attr=&lang=cs_CZ`                              | Lists films; for example, _Odyssea_ has ID `7268s2r`            |
+| `film-events/in-cinema/{cinemaId}/at-date/{YYYY-MM-DD}?attr=&lang=cs_CZ` | Returns films and screenings for a cinema on a specific date    |
+| `dates/in-cinema/{cinemaId}/until/{YYYY-MM-DD}?attr=70-mm&lang=cs_CZ`    | Returns dates with matching screenings in a single request      |
+| `attributes?lang=cs_CZ`                                                  | Returns the complete attribute catalogue used by `attributeIds` |
 
 The `attr` filter is applied server-side, but multiple values are often combined
 using **OR**, not **AND**. The watcher therefore sends one attribute to the API
@@ -131,24 +131,26 @@ python local_run.py --once          # Run once and initialize state.json
 python local_run.py --interval 60   # Poll every 60 seconds and print alerts
 ```
 
+This README file will be completely rewritten in future. For now an important thing is that terraform will require an existing SES email identity to import during `terraform plan`.
+
 ## Configuration
 
 Configuration is provided through environment variables:
 
-| Variable | Default | Description |
-|---|---|---|
-| `CINEMA_ID` | `1052` | Cinema ID; defaults to Praha Flora |
-| `FILM_ID` | — | Exact film ID, for example `7268s2r`; takes precedence over `FILM_MATCH` |
-| `FILM_MATCH` | `odys` | Case-insensitive fragment of the film title |
-| `REQUIRED_ATTRS` | `70-mm` | Required event attributes as CSV; leave empty to accept all screenings |
-| `HORIZON_DAYS` | `45` | Number of days to scan ahead |
-| `MIN_RATIO_DELTA` | `0.002` | Minimum increase in available seats; one seat is approximately `0.0026` |
-| `CAPACITY` | `385` | Auditorium capacity used to display seat counts; set to `0` to display percentages |
-| `ALERT_COOLDOWN_MIN` | `15` | Cooldown in minutes per screening and alert type |
-| `INTENSIVE` | `false` | For AWS Lambda, poll repeatedly until the timeout; intended for Tuesday ticket releases |
-| `INTENSIVE_INTERVAL_S` | `15` | Delay between scans in intensive mode |
-| `STATE_BACKEND` | `file` | State backend: `file` or `dynamodb` |
-| `STATE_FILE` / `DDB_TABLE` | `state.json` / `cc-watcher-state` | File path or DynamoDB table used to store state |
-| `NOTIFY_BACKEND` | `console` | Notification backend: `console` or `ses` |
-| `SES_FROM` / `SES_TO` | — | SES sender and comma-separated recipients |
-| `WATCHER_AWS_REGION` | `eu-central-1` | AWS region |
+| Variable                   | Default                           | Description                                                                             |
+| -------------------------- | --------------------------------- | --------------------------------------------------------------------------------------- |
+| `CINEMA_ID`                | `1052`                            | Cinema ID; defaults to Praha Flora                                                      |
+| `FILM_ID`                  | —                                 | Exact film ID, for example `7268s2r`; takes precedence over `FILM_MATCH`                |
+| `FILM_MATCH`               | `odys`                            | Case-insensitive fragment of the film title                                             |
+| `REQUIRED_ATTRS`           | `70-mm`                           | Required event attributes as CSV; leave empty to accept all screenings                  |
+| `HORIZON_DAYS`             | `45`                              | Number of days to scan ahead                                                            |
+| `MIN_RATIO_DELTA`          | `0.002`                           | Minimum increase in available seats; one seat is approximately `0.0026`                 |
+| `CAPACITY`                 | `385`                             | Auditorium capacity used to display seat counts; set to `0` to display percentages      |
+| `ALERT_COOLDOWN_MIN`       | `15`                              | Cooldown in minutes per screening and alert type                                        |
+| `INTENSIVE`                | `false`                           | For AWS Lambda, poll repeatedly until the timeout; intended for Tuesday ticket releases |
+| `INTENSIVE_INTERVAL_S`     | `15`                              | Delay between scans in intensive mode                                                   |
+| `STATE_BACKEND`            | `file`                            | State backend: `file` or `dynamodb`                                                     |
+| `STATE_FILE` / `DDB_TABLE` | `state.json` / `cc-watcher-state` | File path or DynamoDB table used to store state                                         |
+| `NOTIFY_BACKEND`           | `console`                         | Notification backend: `console` or `ses`                                                |
+| `SES_FROM` / `SES_TO`      | —                                 | SES sender and comma-separated recipients                                               |
+| `WATCHER_AWS_REGION`       | `eu-central-1`                    | AWS region                                                                              |
