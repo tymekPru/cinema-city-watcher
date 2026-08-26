@@ -62,7 +62,9 @@ try:
     from zoneinfo import ZoneInfo
 
     _PRAGUE = ZoneInfo("Europe/Prague")
-except Exception:  # brak tzdata — UTC wystarczy, różnica dotyka tylko okolic północy
+except (ImportError, KeyError):
+    # No zoneinfo (old Python) or no tzdata (slim images): ZoneInfoNotFoundError is a
+    # KeyError. UTC is close enough - the difference only matters around midnight.
     _PRAGUE = timezone.utc
 
 BOOKING_LINK = "https://www.cinemacity.cz/cz/booking-router/launch/{event_id}?lang=cs"
@@ -104,7 +106,8 @@ class Detector:
             dates = self.api.dates_with_events(self.cfg.cinema_id, until, self._server_attr())
             if dates:
                 return [d for d in dates if d >= today.isoformat()]
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 - deliberate: any failure here falls back
+            # to scanning the whole horizon, which is slower but always correct.
             print(f"[warn] lista dat niedostępna, skanuję cały horyzont: {exc}")
         return [(today + timedelta(days=o)).isoformat() for o in range(self.cfg.horizon_days + 1)]
 
@@ -123,7 +126,8 @@ class Detector:
         for date in self._dates_to_scan(today):
             try:
                 films, events = self.api.film_events(self.cfg.cinema_id, date, self._server_attr())
-            except Exception as exc:  # jeden feralny dzień nie ubija całego przebiegu
+            except Exception as exc:  # noqa: BLE001 - deliberate: the days are independent,
+                # so one bad response must not take down the whole sweep.
                 print(f"[warn] {date}: {exc}")
                 continue
             for ev in events:
