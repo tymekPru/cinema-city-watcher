@@ -1,3 +1,61 @@
+"""Turns the cinema's current schedule into alerts worth mailing.
+
+WHY THIS IS NOT A DIFF OF TWO LISTS
+-----------------------------------
+The API only ever answers "here is what is on sale right now". Everything interesting -
+a screening appearing, seats coming back - is a *change*, so the watcher has to remember
+what it saw last time and compare. That memory is the state, and every subtlety in this
+module comes from keeping it honest.
+
+STATE
+-----
+One dictionary, persisted between runs (a local file, or DynamoDB on AWS)::
+
+    {
+      "events": {
+        "<screening id>": {
+          "ratio":   0.12,          # comparison baseline, NOT simply "last seen value"
+          "soldOut": False,
+          "when":    "2026-09-02T20:00:00",
+          "seen":    "<first time we saw this screening>",
+          "alerts":  {"NOWE MIEJSCA": "<when we last mailed about this kind>"},
+        },
+      },
+      "last_sweep": "<end of the last completed sweep>",
+    }
+
+ONE SWEEP
+---------
+Ask the API which days have matching screenings, fetch each day, keep the ones that pass
+the film and attribute filters, and compare every screening against its remembered record.
+The sweep returns alert texts; mailing them is the caller's job (see runner.py).
+
+THREE KINDS OF ALERT
+--------------------
+NOWY SEANS      a matching screening we have never seen before (the weekly drop)
+POWROT BILETOW  it was soldOut, and now it is not
+NOWE MIEJSCA    the free-seat ratio rose by at least ``min_ratio_delta`` above the baseline
+
+FOUR RULES THAT KEEP THE MAILBOX USABLE - AND WHY EACH EXISTS
+-------------------------------------------------------------
+1. First sweep stays silent. Without it the very first mail would list every screening in
+   the horizon. "First" is decided by the absence of ``last_sweep`` - deliberately not by
+   an empty ``events`` map, because rule 4 can empty that map at any time.
+
+2. Cooldown. The same kind of alert for the same screening is not repeated more often than
+   ``cooldown_min``, so a screening hovering around the threshold cannot mail every minute.
+
+3. The baseline only rises when an alert is actually sent, and falls as soon as seats are
+   sold. If it simply followed the last observed value, a rise muted by rule 2 would be
+   forgotten, and seats trickling back a few at a time would never add up to an alert.
+
+4. Screenings that have already played are dropped from the state, so it does not grow
+   forever. This is what can empty ``events`` - hence the wording of rule 1.
+
+Threshold ``min_ratio_delta`` also does quiet work: a handful of permanently free seats
+(wheelchair spaces, restricted view) sit at a constant ratio and never trigger anything.
+"""
+
 from datetime import datetime, timedelta, timezone
 
 try:
