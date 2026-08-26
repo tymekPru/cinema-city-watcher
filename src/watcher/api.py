@@ -28,21 +28,29 @@ class QuickbookApi:
         self._last_request = time.monotonic()
         return data.get("body", {})
 
-    def dates_with_events(self, cinema_id: str, until: str, attr: str = "") -> list[str]:
+    def dates_with_events(
+        self, cinema_id: str, until: str, attr: str = ""
+    ) -> list[str]:
         """Dni (YYYY-MM-DD), w których kino ma jakikolwiek pasujący seans — JEDEN request.
 
         Pozwala pominąć dni bez seansów zamiast pytać o każdy dzień horyzontu.
         Pojawienie się nowej daty na tej liście to sam w sobie sygnał dropu.
         """
-        body = self._get(f"dates/in-cinema/{cinema_id}/until/{until}?attr={attr}&lang={self.lang}")
+        body = self._get(
+            f"dates/in-cinema/{cinema_id}/until/{until}?attr={attr}&lang={self.lang}"
+        )
         return body.get("dates", [])
 
-    def film_events(self, cinema_id: str, date: str, attr: str = "") -> tuple[dict, list]:
+    def film_events(
+        self, cinema_id: str, date: str, attr: str = ""
+    ) -> tuple[dict, list]:
         """Filmy (wg id) i seanse dla kina w danym dniu (YYYY-MM-DD).
 
         `attr` filtruje po stronie serwera. Uwaga: wiele wartości łączy się jak OR,
         więc podajemy tylko jedną (zawężenie), a resztę dociskamy po naszej stronie.
         """
-        body = self._get(f"film-events/in-cinema/{cinema_id}/at-date/{date}?attr={attr}&lang={self.lang}")
+        body = self._get(
+            f"film-events/in-cinema/{cinema_id}/at-date/{date}?attr={attr}&lang={self.lang}"
+        )
         films = {f["id"]: f for f in body.get("films", [])}
         return films, body.get("events", [])

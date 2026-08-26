@@ -103,13 +103,18 @@ class Detector:
         """Dni do odpytania: najpierw pytamy API, które w ogóle mają pasujące seanse."""
         until = (today + timedelta(days=self.cfg.horizon_days)).isoformat()
         try:
-            dates = self.api.dates_with_events(self.cfg.cinema_id, until, self._server_attr())
+            dates = self.api.dates_with_events(
+                self.cfg.cinema_id, until, self._server_attr()
+            )
             if dates:
                 return [d for d in dates if d >= today.isoformat()]
         except Exception as exc:  # noqa: BLE001 - deliberate: any failure here falls back
             # to scanning the whole horizon, which is slower but always correct.
             print(f"[warn] lista dat niedostępna, skanuję cały horyzont: {exc}")
-        return [(today + timedelta(days=o)).isoformat() for o in range(self.cfg.horizon_days + 1)]
+        return [
+            (today + timedelta(days=o)).isoformat()
+            for o in range(self.cfg.horizon_days + 1)
+        ]
 
     def _server_attr(self) -> str:
         # tylko jeden atrybut serwerowo — wiele wartości działa jak OR i rozszerzyłoby wynik
@@ -125,7 +130,9 @@ class Detector:
 
         for date in self._dates_to_scan(today):
             try:
-                films, events = self.api.film_events(self.cfg.cinema_id, date, self._server_attr())
+                films, events = self.api.film_events(
+                    self.cfg.cinema_id, date, self._server_attr()
+                )
             except Exception as exc:  # noqa: BLE001 - deliberate: the days are independent,
                 # so one bad response must not take down the whole sweep.
                 print(f"[warn] {date}: {exc}")
@@ -140,13 +147,17 @@ class Detector:
 
         # sprzątanie: seanse, które już się odbyły
         cutoff = (today - timedelta(days=1)).isoformat()
-        for eid in [k for k, v in known.items() if (v.get("when") or "9999")[:10] < cutoff]:
+        for eid in [
+            k for k, v in known.items() if (v.get("when") or "9999")[:10] < cutoff
+        ]:
             del known[eid]
 
         data["last_sweep"] = datetime.now(timezone.utc).isoformat()
         self.state.save(data)
         if first_run:
-            print(f"[init] zainicjalizowano stan: {len(known)} pasujących seansów (bez alertów)")
+            print(
+                f"[init] zainicjalizowano stan: {len(known)} pasujących seansów (bez alertów)"
+            )
         return alerts
 
     def _check_event(self, ev: dict, film: dict, known: dict, first_run: bool):
@@ -200,4 +211,6 @@ class Detector:
         last = rec["alerts"].get(kind)
         if not last:
             return True
-        return now - datetime.fromisoformat(last) >= timedelta(minutes=self.cfg.cooldown_min)
+        return now - datetime.fromisoformat(last) >= timedelta(
+            minutes=self.cfg.cooldown_min
+        )
