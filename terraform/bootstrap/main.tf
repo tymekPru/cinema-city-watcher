@@ -5,6 +5,14 @@ terraform {
       version = "~> 6.0"
     }
   }
+
+  backend "s3" {
+    bucket = "cc-watcher-tfstate-bucket"
+    key    = "cc-watcher-bootstrap/terraform.tfstate"
+    region = "eu-central-1"
+
+    use_lockfile = true
+  }
 }
 
 provider "aws" {
@@ -31,8 +39,8 @@ resource "aws_s3_bucket_versioning" "tfstate" {
 resource "aws_s3_bucket_public_access_block" "tfstate" {
   bucket = aws_s3_bucket.tfstate.id
 
-  block_public_acls   = true
-  block_public_policy = true
-  ignore_public_acls  = true
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
   restrict_public_buckets = true
 }
