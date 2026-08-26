@@ -34,7 +34,6 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
-        working-directory: ./src
 
       - name: Validate Terraform bootstrap
         run: |
