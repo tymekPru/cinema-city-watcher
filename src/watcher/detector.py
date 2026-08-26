@@ -67,6 +67,9 @@ except (ImportError, KeyError):
     # KeyError. UTC is close enough - the difference only matters around midnight.
     _PRAGUE = timezone.utc
 
+# Fallback only. Every event normally carries "bookingRouterLaunchLink" holding exactly
+# this shape; rebuilding it by hand is the last resort, so that a change to their booking
+# URL scheme does not silently mail out dead links.
 BOOKING_LINK = "https://www.cinemacity.cz/cz/booking-router/launch/{event_id}?lang=cs"
 
 
@@ -196,11 +199,19 @@ class Detector:
         rec["ratio"] = ratio
         rec["alerts"][kind] = now.isoformat()
         when = (ev.get("eventDateTime") or "")[:16].replace("T", " ")
-        return (
-            f"{kind}{extra}: {film.get('name', '?')} — {when}"
-            f" | sala {ev.get('auditorium', '?')} | wolne ~{self._seats(ratio)}"
-            f"\n  kup: {BOOKING_LINK.format(event_id=eid)}"
-        )
+        booking = ev.get("bookingRouterLaunchLink") or BOOKING_LINK.format(event_id=eid)
+        lines = [
+            (
+                f"{kind}{extra}: {film.get('name', '?')} — {when}"
+                f" | sala {ev.get('auditorium', '?')} | wolne ~{self._seats(ratio)}"
+            ),
+            f"  kup: {booking}",
+        ]
+        # The booking link hands off to the ticketing system, which can bounce the request.
+        # The film page always opens, so it is worth having as a second way in.
+        if film.get("link"):
+            lines.append(f"  seans: {film['link']}")
+        return "\n".join(lines)
 
     def _seats(self, ratio: float) -> str:
         if self.cfg.capacity:
