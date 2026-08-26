@@ -34,7 +34,9 @@ class DynamoDbState:
         return json.loads(item["data"]) if item else {}
 
     def save(self, data: dict) -> None:
-        self.table.put_item(Item={"pk": "state", "data": json.dumps(data, ensure_ascii=False)})
+        self.table.put_item(
+            Item={"pk": "state", "data": json.dumps(data, ensure_ascii=False)}
+        )
 
 
 def make_state(cfg):

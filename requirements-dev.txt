@@ -1,0 +1,9 @@
+# Development and CI dependencies.
+#
+# Versions are pinned on purpose. An unpinned linter is a build that breaks on its own:
+# ruff 0.16.4 started reporting BLE001 by default and turned CI red without a single line
+# of code changing. Bump these deliberately, in their own pull request.
+-r requirements.txt
+
+pytest==9.1.1
+ruff==0.16.4

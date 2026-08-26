@@ -1,0 +1,10 @@
+# Runtime dependencies.
+#
+# The watcher itself is deliberately standard-library only (urllib instead of requests,
+# zipfile instead of a packaging tool), which is why the deployment package is tiny.
+# boto3 is the single exception: it is needed for the DynamoDB state backend and for SES,
+# and it is imported lazily so a local run with the file/console backends needs nothing.
+#
+# The AWS Lambda runtime already ships boto3 - this entry is here so local runs, editors
+# and CI resolve the same import.
+boto3>=1.34
