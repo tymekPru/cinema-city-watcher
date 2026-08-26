@@ -17,7 +17,6 @@ build/
 .terraform/
 terraform.tfstate*
 *.tfvars
-*.lock.hcl
 
 # local documentation
 DEVOPS-PLAN.md
