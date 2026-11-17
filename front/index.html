@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cinema City watcher</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div>
+      <h1>Cinema City watcher</h1>
+      <p class="muted">Alerts for screenings, seats and returning tickets</p>
+    </div>
+    <div class="actions-top">
+      <button id="settings-open" class="btn">Settings</button>
+      <button id="add" class="btn primary">Add alert</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="card">
+      <div class="table-wrap">
+        <table id="alerts">
+          <thead>
+            <tr>
+              <th>Film</th>
+              <th>Cinema</th>
+              <th>Format</th>
+              <th>Language</th>
+              <th>Dates</th>
+              <th>Status</th>
+              <th>Last check</th>
+              <th class="num">Tracked</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+      </div>
+      <p id="empty" class="empty muted" hidden>No alerts yet. Add one to start watching.</p>
+      <p id="load-error" class="error" hidden></p>
+    </section>
+  </main>
+
+  <div id="wizard" class="modal" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="wz-title">
+      <header class="dialog-head">
+        <h2 id="wz-title">New alert</h2>
+        <button id="wz-close" class="icon" aria-label="Close">&times;</button>
+      </header>
+      <ol id="steps" class="steps"></ol>
+      <div id="wz-body" class="wz-body"></div>
+      <p id="wz-error" class="error" hidden></p>
+      <footer class="dialog-foot">
+        <button id="wz-back" class="btn">Back</button>
+        <span class="spacer"></span>
+        <button id="wz-next" class="btn primary">Next</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="settings" class="modal" hidden>
+    <div class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="st-title">
+      <header class="dialog-head">
+        <h2 id="st-title">Settings</h2>
+        <button id="st-close" class="icon" aria-label="Close">&times;</button>
+      </header>
+      <div class="wz-body">
+        <p class="hint muted">Saved to appsettings.json. A running watcher picks changes up on its next sweep.</p>
+        <div id="st-fields" class="fields"></div>
+      </div>
+      <p id="st-error" class="error" hidden></p>
+      <footer class="dialog-foot">
+        <span class="spacer"></span>
+        <button id="st-save" class="btn primary">Save</button>
+      </footer>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
