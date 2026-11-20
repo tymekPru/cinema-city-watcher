@@ -280,7 +280,8 @@ td.actions .btn { padding: 5px 10px; font-size: 13px; }
 }
 
 /* ---- header actions ---- */
-.actions-top { display: flex; gap: 8px; }
+.actions-top { display: flex; gap: 8px; align-items: center; }
+#run-status { font-size: 13px; margin-right: 4px; }
 .dialog.narrow { max-width: 520px; }
 
 /* ---- disabled choice ---- */

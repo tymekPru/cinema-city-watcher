@@ -10,6 +10,11 @@ const I18N = {
     "lang.en": "English",
     "settings": "Settings",
     "addAlert": "Add alert",
+    "run": "Run now",
+    "running": "Checking\u2026",
+    "runDone": "Done, {n} notifications sent",
+    "err.busy": "A check is already running.",
+    "err.run_failed": "Check failed: {detail}",
     "close": "Close",
     "th.film": "Film",
     "th.cinema": "Cinema",
@@ -106,12 +111,12 @@ const I18N = {
     "language.subMeta": "original {o}, subtitles {s}",
     "language.subMetaNoAudio": "subtitles {s}",
     "dates.q": "Dates and options",
-    "dates.hint": "Leave the dates empty to watch every screening, whenever it is scheduled. New screenings are always reported.",
+    "dates.hint": "Only screenings within these dates are watched. Leave both empty to watch every date. Within the range, new screenings are always reported.",
     "dates.from": "From",
     "dates.to": "To",
     "dates.clear": "Clear",
     "seats.label": "Also notify when seats free up on existing screenings",
-    "seats.help": "For a sold-out screening on the date you want. Ignored for screenings that appear later, which are reported anyway.",
+    "seats.help": "For a sold-out screening on the date you want. Screenings added later in the range are reported anyway.",
     "err.order": "The start date must not be after the end date.",
     "err.duplicate": "An identical alert already exists: {film} at {cinema}.",
     "err.no_topic": "No ntfy topic configured. Save one first.",
@@ -150,6 +155,11 @@ const I18N = {
     "lang.en": "English",
     "settings": "Ustawienia",
     "addAlert": "Dodaj alert",
+    "run": "Sprawdź teraz",
+    "running": "Sprawdzanie\u2026",
+    "runDone": "Gotowe, wysłano {n} powiadomień",
+    "err.busy": "Sprawdzanie już trwa.",
+    "err.run_failed": "Sprawdzanie nie powiodło się: {detail}",
     "close": "Zamknij",
     "th.film": "Film",
     "th.cinema": "Kino",
@@ -246,12 +256,12 @@ const I18N = {
     "language.subMeta": "oryginał {o}, napisy {s}",
     "language.subMetaNoAudio": "napisy {s}",
     "dates.q": "Daty i opcje",
-    "dates.hint": "Zostaw daty puste, aby obserwować każdy seans niezależnie od terminu. Nowe seanse są zgłaszane zawsze.",
+    "dates.hint": "Obserwowane są tylko seanse w tych datach. Zostaw oba pola puste, aby obserwować każdy termin. W wybranym zakresie nowe seanse są zgłaszane zawsze.",
     "dates.from": "Od",
     "dates.to": "Do",
     "dates.clear": "Wyczyść",
     "seats.label": "Powiadamiaj też, gdy zwolnią się miejsca na istniejących seansach",
-    "seats.help": "Dla wyprzedanego seansu w wybranym dniu. Seanse dodane później są zgłaszane niezależnie od tej opcji.",
+    "seats.help": "Dla wyprzedanego seansu w wybranym dniu. Seanse dodane później w tym zakresie są zgłaszane niezależnie od tej opcji.",
     "err.order": "Data początkowa nie może być późniejsza niż końcowa.",
     "err.duplicate": "Taki alert już istnieje: {film} w kinie {cinema}.",
     "err.no_topic": "Nie ustawiono tematu ntfy. Najpierw zapisz temat.",
@@ -542,6 +552,28 @@ async function removeAlert(a) {
     await loadAlerts();
   } catch (e) {
     alert(t("deleteFailed", { msg: errText(e) }));
+  }
+}
+
+let runStatusTimer = null;
+
+async function runSweep() {
+  const btn = $("run");
+  const status = $("run-status");
+  clearTimeout(runStatusTimer);
+  btn.disabled = true;
+  status.classList.remove("error");
+  status.textContent = t("running");
+  try {
+    const res = await api("/api/run", { method: "POST" });
+    status.textContent = t("runDone", { n: res.alerts });
+    await loadAlerts();
+  } catch (e) {
+    status.textContent = errText(e);
+    status.classList.add("error");
+  } finally {
+    btn.disabled = false;
+    runStatusTimer = setTimeout(() => (status.textContent = ""), 8000);
   }
 }
 
@@ -873,6 +905,7 @@ const wz = {
 // ---------- boot ----------
 
 $("add").addEventListener("click", () => wz.open());
+$("run").addEventListener("click", runSweep);
 $("wz-close").addEventListener("click", () => wz.close());
 $("wz-back").addEventListener("click", () => wz.back());
 $("wz-next").addEventListener("click", () => wz.next());

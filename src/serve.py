@@ -10,6 +10,7 @@ import argparse
 import json
 import mimetypes
 import sys
+import threading
 import time
 from datetime import timedelta
 from http import HTTPStatus
@@ -110,6 +111,7 @@ def _formats(attribute_groups: list[dict]) -> list[dict]:
 
 class Handler(BaseHTTPRequestHandler):
     app: App  # set by serve()
+    sweep_lock = threading.Lock()
 
     def log_message(self, fmt, *args) -> None:
         print(f"[{time.strftime('%H:%M:%S')}] {self.command} {self.path} {args[1]}")
@@ -151,6 +153,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/api/notify/test":
             return self._notify_test()
+        if path == "/api/run":
+            return self._run_sweep()
         if path != "/api/alerts":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         try:
@@ -203,6 +207,18 @@ class Handler(BaseHTTPRequestHandler):
                 HTTPStatus.BAD_GATEWAY, "; ".join(errors), code="notify_failed", detail="; ".join(errors)
             )
         self._json({"ok": True, "topic": cfg.ntfy_topic})
+
+    def _run_sweep(self) -> None:
+        """One sweep on demand, same as `python src/main.py` but inside this process."""
+        if not self.sweep_lock.acquire(blocking=False):
+            return self._error(HTTPStatus.CONFLICT, "a sweep is already running", code="busy")
+        try:
+            sent = self.app.run_once()
+        except Exception as exc:  # noqa: BLE001
+            return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"sweep failed: {exc}", code="run_failed", detail=str(exc))
+        finally:
+            self.sweep_lock.release()
+        self._json({"alerts": sent})
 
     # ---- views ----
 
