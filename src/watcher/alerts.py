@@ -6,12 +6,14 @@ alerts.json is a plain list:
       {
         "id": "3f9a1c2b",
         "country": "pl",
-        "film":   {"id": "7460s2r", "name": "Odyseja", "releaseDate": "2026-12-18", "comingSoon": false},
+        "film":   {"id": "7460s2r", "name": "Odyseja", "releaseDate": "2026-12-18",
+                   "comingSoon": false, "poster": "https://.../7460S2R.jpg"},
         "cinema": {"id": "1060", "name": "Warszawa - Sadyba", "imax": true},
         "attrs":  ["imax", "subbed"],
         "dateFrom": "2026-11-18",      # or null: no lower bound
         "dateTo":   "2026-12-31",      # or null: no upper bound
         "seatChanges": false,          # also report seats freed on known screenings
+        "hiddenEvents": ["12345"],     # screening ids the user hid; shown dimmed, never alerted
         "createdAt": "2026-11-17T21:00:00+00:00",
         "hash": "0c3b5e3a9d2f1c47"
       }
@@ -62,6 +64,9 @@ def validate(payload, country_codes, today: date) -> dict:
     if date_to and date_to < today:
         raise ValueError("dateTo is in the past")
     release = _optional_date(film.get("releaseDate"), "film.releaseDate")
+    poster = str(film.get("poster") or "")
+    if poster and not poster.startswith("https://"):
+        raise ValueError("film.poster must be an https URL")
     return {
         "country": country,
         "film": {
@@ -69,6 +74,7 @@ def validate(payload, country_codes, today: date) -> dict:
             "name": str(film["name"]),
             "releaseDate": release.isoformat() if release else None,
             "comingSoon": bool(film.get("comingSoon")),
+            "poster": poster or None,
         },
         "cinema": {
             "id": str(cinema["id"]),
@@ -122,8 +128,10 @@ def _normalise(alert: dict) -> dict:
     alert.setdefault("dateTo", None)
     # Alerts from before this flag existed reported seat changes, so keep doing that.
     alert.setdefault("seatChanges", True)
+    alert.setdefault("hiddenEvents", [])
     alert["film"].setdefault("releaseDate", None)
     alert["film"].setdefault("comingSoon", False)
+    alert["film"].setdefault("poster", None)
     alert["hash"] = fingerprint(alert)
     return alert
 
@@ -156,6 +164,22 @@ class AlertStore:
         alerts.append(alert)
         self.save(alerts)
         return alert
+
+    def set_hidden(self, alert_id: str, event_id: str, hidden: bool, tracked_ids) -> list[str]:
+        """Hide or unhide one screening. Ids no longer tracked are dropped on the way."""
+        alerts = self.load()
+        for alert in alerts:
+            if alert.get("id") != alert_id:
+                continue
+            keep = {e for e in alert["hiddenEvents"] if e in tracked_ids}
+            if hidden:
+                keep.add(event_id)
+            else:
+                keep.discard(event_id)
+            alert["hiddenEvents"] = sorted(keep)
+            self.save(alerts)
+            return alert["hiddenEvents"]
+        raise KeyError(alert_id)
 
     def delete(self, alert_id: str) -> bool:
         alerts = self.load()

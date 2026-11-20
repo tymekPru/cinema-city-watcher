@@ -30,6 +30,8 @@ Alert kinds:
                     out and no longer is, or its free-seat ratio rose by at least
                     min_ratio_delta above the baseline
 
+Screenings listed in the alert's hiddenEvents are tracked but never alerted.
+
 Rules:
     1. The first sweep only records state and sends nothing. "First" means there is
        no last_sweep yet, not that events is empty, because rule 4 can empty events.
@@ -98,6 +100,7 @@ class Detector:
         start = max(day.isoformat(), alert.get("dateFrom") or "")
         end = alert.get("dateTo") or (day + timedelta(days=HORIZON_DAYS)).isoformat()
         watch_seats = bool(alert.get("seatChanges"))
+        hidden = set(alert.get("hiddenEvents", []))
         texts: list[str] = []
 
         for d in self._dates_to_scan(api, cinema_id, start, end, server_attr):
@@ -111,7 +114,9 @@ class Detector:
                     continue
                 if not attrs <= set(ev.get("attributeIds", [])):
                     continue
-                text = self._check_event(ev, films.get(film_id, {}), known, first_run, watch_seats)
+                text = self._check_event(
+                    ev, films.get(film_id, {}), known, first_run, watch_seats and str(ev["id"]) not in hidden, str(ev["id"]) in hidden
+                )
                 if text:
                     texts.append(text)
 
@@ -135,7 +140,7 @@ class Detector:
         days = min((date.fromisoformat(end) - first).days, FALLBACK_SCAN_DAYS - 1)
         return [(first + timedelta(days=o)).isoformat() for o in range(days + 1)]
 
-    def _check_event(self, ev: dict, film: dict, known: dict, first_run: bool, watch_seats: bool):
+    def _check_event(self, ev: dict, film: dict, known: dict, first_run: bool, watch_seats: bool, hidden: bool = False):
         eid = str(ev["id"])
         ratio = float(ev.get("availabilityRatio") or 0.0)
         sold_out = bool(ev.get("soldOut"))
@@ -154,6 +159,10 @@ class Detector:
             "alerts": (prev or {}).get("alerts", {}),
         }
 
+        if hidden:
+            # Still tracked for the UI, never alerted.
+            rec["ratio"] = ratio
+            return None
         if prev is None:
             if first_run:
                 return None

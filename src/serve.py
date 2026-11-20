@@ -174,6 +174,9 @@ class Handler(BaseHTTPRequestHandler):
             )
 
     def do_PUT(self) -> None:
+        parts = urlparse(self.path).path.strip("/").split("/")
+        if len(parts) == 5 and parts[:2] == ["api", "alerts"] and parts[3] == "events":
+            return self._set_hidden(parts[2], parts[4])
         if urlparse(self.path).path != "/api/settings":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         try:
@@ -220,7 +223,24 @@ class Handler(BaseHTTPRequestHandler):
             self.sweep_lock.release()
         self._json({"alerts": sent})
 
+    def _set_hidden(self, alert_id: str, event_id: str) -> None:
+        try:
+            hidden = bool(json.loads(self._body()).get("hidden"))
+        except (json.JSONDecodeError, AttributeError):
+            return self._error(HTTPStatus.BAD_REQUEST, "body must be a JSON object")
+        tracked = self.app.state.load().get(alert_id, {}).get("events", {})
+        if event_id not in tracked:
+            return self._error(HTTPStatus.NOT_FOUND, "no such screening")
+        try:
+            self._json({"hiddenEvents": self.app.alerts.set_hidden(alert_id, event_id, hidden, tracked)})
+        except KeyError:
+            self._error(HTTPStatus.NOT_FOUND, "no such alert")
+
     # ---- views ----
+
+    def _good_seats(self, ev: dict) -> bool:
+        free = ev.get("current", ev.get("ratio", 0.0))
+        return not ev.get("soldOut") and (1 - free) * 100 < self.app.cfg.good_seats_max_sold
 
     def _alerts_view(self) -> list[dict]:
         state = self.app.state.load()
@@ -228,6 +248,8 @@ class Handler(BaseHTTPRequestHandler):
         out = []
         for alert in self.app.alerts.load():
             st = state.get(alert["id"], {})
+            hidden = set(alert["hiddenEvents"])
+            shown = {eid: ev for eid, ev in st.get("events", {}).items() if eid not in hidden}
             on_sale = st.get("on_sale")
             if on_sale is None:
                 on_sale = not alert["film"].get("comingSoon")
@@ -246,15 +268,20 @@ class Handler(BaseHTTPRequestHandler):
                     "onSale": on_sale,
                     "lastSweep": st.get("last_sweep"),
                     "lastAlert": st.get("last_alert"),
-                    "tracked": len(st.get("events", {})),
+                    "tracked": len(shown),
+                    "hidden": len(st.get("events", {})) - len(shown),
+                    "goodSeats": sum(self._good_seats(ev) for ev in shown.values()),
+                    "goodSeatsMaxSold": self.app.cfg.good_seats_max_sold,
                 }
             )
         return out
 
     def _events_view(self, alert_id: str) -> None:
-        if not any(a.get("id") == alert_id for a in self.app.alerts.load()):
+        alert = next((a for a in self.app.alerts.load() if a.get("id") == alert_id), None)
+        if alert is None:
             return self._error(HTTPStatus.NOT_FOUND, "no such alert")
         events = self.app.state.load().get(alert_id, {}).get("events", {})
+        hidden = set(alert["hiddenEvents"])
         rows = [
             {
                 "id": eid,
@@ -263,6 +290,8 @@ class Handler(BaseHTTPRequestHandler):
                 "free": ev.get("current", ev.get("ratio", 0.0)),
                 "soldOut": bool(ev.get("soldOut")),
                 "book": ev.get("book"),
+                "hidden": eid in hidden,
+                "good": eid not in hidden and self._good_seats(ev),
             }
             for eid, ev in events.items()
         ]

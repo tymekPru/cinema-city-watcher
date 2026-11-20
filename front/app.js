@@ -147,6 +147,15 @@ const I18N = {
     "st.poll.help": "Pause between sweeps when the watcher runs with --keep-alive.",
     "st.dataDir": "Data directory",
     "st.dataDir.help": "Where alerts.json and state.json live. Relative to appsettings.json.",
+    "st.goodSeats": "Good seats threshold (% sold)",
+    "st.goodSeats.help": "Screenings with fewer seats sold than this get a green badge.",
+    "goodSeats": "{n} screenings under {p}% sold",
+    "goodSeat": "under {p}% sold",
+    "hide": "Hide",
+    "unhide": "Unhide",
+    "hiddenCount": "{n} hidden",
+    "showHidden": "show",
+    "hideHidden": "collapse",
   },
   pl: {
     "title": "Cinema City watcher",
@@ -292,6 +301,15 @@ const I18N = {
     "st.poll.help": "Pauza między sprawdzeniami, gdy watcher działa z --keep-alive.",
     "st.dataDir": "Katalog danych",
     "st.dataDir.help": "Gdzie leżą alerts.json i state.json. Względem appsettings.json.",
+    "st.goodSeats": "Próg dobrych miejsc (% sprzedanych)",
+    "st.goodSeats.help": "Seanse ze sprzedażą poniżej tego progu dostają zielone oznaczenie.",
+    "goodSeats": "{n} seansów ze sprzedażą poniżej {p}%",
+    "goodSeat": "sprzedano mniej niż {p}%",
+    "hide": "Ukryj",
+    "unhide": "Przywróć",
+    "hiddenCount": "ukryte: {n}",
+    "showHidden": "pokaż",
+    "hideHidden": "zwiń",
   },
 };
 const LOCALES = { en: "en-GB", pl: "pl-PL" };
@@ -352,6 +370,7 @@ const SETTINGS_FIELDS = [
   { path: "alerts.cooldownMinutes", key: "st.cooldown", step: "1" },
   { path: "runtime.pollIntervalSeconds", key: "st.poll", step: "1" },
   { path: "runtime.dataDir", key: "st.dataDir", type: "text" },
+  { path: "ui.goodSeatsMaxSoldPercent", key: "st.goodSeats", step: "1" },
 ];
 const getPath = (obj, path) => path.split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 const setPath = (obj, path, value) => {
@@ -437,26 +456,43 @@ const formatLabel = (id) => (id ? formatLabels[id] || id : t("any"));
 const languageLabel = (id) => (id ? (LANGUAGE_KEYS[id] ? t(LANGUAGE_KEYS[id]) : id) : t("any"));
 const anyOr = (value) => (value ? value : el("span", { class: "muted" }, t("any")));
 const tag = (text) => el("span", { class: "tag", style: "margin-left:8px" }, text);
+const goodBadge = (title) => el("span", { class: "badge good", title }, "!");
+
+function filmCell(a) {
+  return el(
+    "td",
+    { class: "wrap" },
+    a.film.name,
+    a.onSale ? "" : tag(t("comingSoon")),
+    a.goodSeats ? goodBadge(t("goodSeats", { n: a.goodSeats, p: a.goodSeatsMaxSold })) : "",
+    el("span", { class: "sub" }, countryName(a.country))
+  );
+}
+
+function trackedCell(a) {
+  return el("td", { class: "num" }, String(a.tracked), a.hidden ? el("span", { class: "sub" }, t("hiddenCount", { n: a.hidden })) : "");
+}
 
 function row(a) {
   const { format, language } = splitAttrs(a.attrs);
-  return el(
+  const tr = el(
     "tr",
     { class: "row" + (expanded.has(a.id) ? " open" : ""), onclick: () => toggleDetails(a) },
-    el("td", { class: "wrap" }, a.film.name, a.onSale ? "" : tag(t("comingSoon")), el("span", { class: "sub" }, countryName(a.country))),
+    filmCell(a),
     el("td", { class: "wrap" }, a.cinema.name, a.cinema.imax ? tag("IMAX") : ""),
     el("td", {}, anyOr(format && formatLabel(format))),
     el("td", {}, anyOr(language && languageLabel(language))),
     el("td", {}, dateRange(a), a.seatChanges ? tag(t("seatsTag")) : ""),
     el("td", {}, el("span", { class: `pill ${a.status}`, title: a.status === "waiting" ? t("status.waiting.title") : null }, t("status." + a.status))),
     el("td", {}, relTime(a.lastSweep), a.lastAlert ? el("span", { class: "sub" }, t("alerted", { t: relTime(a.lastAlert) })) : ""),
-    el("td", { class: "num" }, String(a.tracked)),
+    trackedCell(a),
     el(
       "td",
       { class: "actions" },
-      el("button", { class: "btn danger", onclick: (e) => { e.stopPropagation(); removeAlert(a); } }, t("delete"))
+      el("button", { class: "btn danger", onclick: (e) => { e.stopPropagation(); removeAlert(a, tr); } }, t("delete"))
     )
   );
+  return tr;
 }
 
 function fillClass(fill, soldOut) {
@@ -465,7 +501,57 @@ function fillClass(fill, soldOut) {
   return "cool";
 }
 
-function detailsRow(a) {
+// ---- collapse / expand animation for screening rows ----
+
+const SLIDE = "height 0.25s ease, opacity 0.18s ease, padding 0.25s ease, margin 0.25s ease, border-width 0.25s ease";
+
+function afterTransition(node, done) {
+  let fired = false;
+  const finish = () => {
+    if (fired) return;
+    fired = true;
+    node.removeEventListener("transitionend", finish);
+    done();
+  };
+  node.addEventListener("transitionend", finish);
+  setTimeout(finish, 320);
+}
+
+function collapse(node) {
+  return new Promise((resolve) => {
+    node.style.height = node.offsetHeight + "px";
+    node.style.overflow = "hidden";
+    node.getBoundingClientRect();
+    node.style.transition = SLIDE;
+    Object.assign(node.style, { height: "0px", opacity: "0", paddingTop: "0", paddingBottom: "0", marginBottom: "0", borderTopWidth: "0", borderBottomWidth: "0" });
+    afterTransition(node, resolve);
+  });
+}
+
+function expand(node) {
+  const height = node.offsetHeight;
+  Object.assign(node.style, { height: "0px", opacity: "0", paddingTop: "0", paddingBottom: "0", marginBottom: "0", borderTopWidth: "0", borderBottomWidth: "0", overflow: "hidden" });
+  node.getBoundingClientRect();
+  node.style.transition = SLIDE;
+  Object.assign(node.style, { height: height + "px", opacity: "1", paddingTop: "", paddingBottom: "", marginBottom: "", borderTopWidth: "", borderBottomWidth: "" });
+  afterTransition(node, () => {
+    node.style.height = node.style.overflow = node.style.transition = node.style.opacity = "";
+  });
+}
+
+const eventsCache = {};
+const showHidden = new Set();
+const filmLists = {};
+
+// Alerts created before posters were stored look theirs up in the catalogue.
+async function posterFor(a) {
+  if (a.film.poster) return a.film.poster;
+  filmLists[a.country] ||= api(`/api/${a.country}/films`).catch(() => []);
+  const film = (await filmLists[a.country]).find((f) => f.id === a.film.id);
+  return film ? film.posterLink : null;
+}
+
+function detailsRow(a, tr) {
   const { format, language } = splitAttrs(a.attrs);
   const props = el(
     "dl",
@@ -481,30 +567,95 @@ function detailsRow(a) {
     el("dt", {}, t("d.lastCheck")), el("dd", {}, relTime(a.lastSweep)),
     el("dt", {}, t("d.id")), el("dd", {}, a.id)
   );
-  const shots = el("div", { class: "shots" }, el("p", { class: "muted" }, t("loading")));
+
+  const heading = el("h4", {}, t("d.tracked", { n: a.tracked }));
+  const note = el("p", { class: "muted" }, t("loading"));
+  const visible = el("div", { class: "shots" });
+  const hiddenList = el("div", { class: "shots" });
+  const hiddenCount = el("span");
+  const toggleLink = el("a", { href: "#", onclick: (e) => { e.preventDefault(); if (showHidden.has(a.id)) showHidden.delete(a.id); else showHidden.add(a.id); sync(); } });
+  const toggleLine = el("p", { class: "muted toggle" }, hiddenCount, " · ", toggleLink);
+  let events = eventsCache[a.id] || null;
+
+  const shot = (ev) => {
+    const fill = Math.min(1, Math.max(0, 1 - (ev.free || 0)));
+    const node = el(
+      "div",
+      { class: "shot" + (ev.soldOut ? " soldout" : "") + (ev.hidden ? " hidden" : ""), "data-when": ev.when || "" },
+      el("span", { class: "when" }, fmtDateTime(ev.when)),
+      el("span", { class: "room", title: ev.room || "" }, ev.room || ""),
+      el("div", { class: "bar" }, el("div", { class: `fill ${fillClass(fill, ev.soldOut)}`, style: `width:${Math.round(fill * 100)}%` })),
+      el("span", { class: "pct" }, ev.good && !ev.hidden ? goodBadge(t("goodSeat", { p: a.goodSeatsMaxSold })) : "", ev.soldOut ? t("soldOut") : t("pctSold", { n: Math.round(fill * 100) })),
+      ev.book ? el("a", { href: ev.book, target: "_blank", rel: "noopener" }, t("book")) : el("span"),
+      el("button", { class: "btn mini", onclick: () => toggle(ev, node) }, t(ev.hidden ? "unhide" : "hide"))
+    );
+    return node;
+  };
+
+  const insertSorted = (list, node) => {
+    const next = [...list.children].find((c) => c.dataset.when > node.dataset.when);
+    list.insertBefore(node, next || null);
+  };
+
+  // Counts in the heading, the toggle line and the table row, from the local event list.
+  const sync = () => {
+    const hidden = events.filter((ev) => ev.hidden);
+    a.tracked = events.length - hidden.length;
+    a.hidden = hidden.length;
+    a.goodSeats = events.filter((ev) => !ev.hidden && ev.good).length;
+    heading.textContent = t("d.tracked", { n: a.tracked });
+    note.hidden = events.length > 0;
+    if (!events.length) note.textContent = t(a.status === "waiting" ? "waitingSoon" : a.lastSweep ? "noScreenings" : "notChecked");
+    toggleLine.hidden = hidden.length === 0;
+    hiddenCount.textContent = t("hiddenCount", { n: hidden.length });
+    const open = showHidden.has(a.id) && hidden.length > 0;
+    toggleLink.textContent = t(open ? "hideHidden" : "showHidden");
+    hiddenList.hidden = !open;
+    tr.children[0].replaceWith(filmCell(a));
+    tr.children[7].replaceWith(trackedCell(a));
+  };
+
+  const render = () => {
+    visible.replaceChildren(...events.filter((ev) => !ev.hidden).map(shot));
+    hiddenList.replaceChildren(...events.filter((ev) => ev.hidden).map(shot));
+    sync();
+  };
+
+  const toggle = async (ev, node) => {
+    try {
+      await api(`/api/alerts/${a.id}/events/${ev.id}`, { method: "PUT", body: JSON.stringify({ hidden: !ev.hidden }) });
+    } catch (e) {
+      alert(errText(e));
+      return;
+    }
+    ev.hidden = !ev.hidden;
+    await collapse(node);
+    node.remove();
+    const target = ev.hidden ? hiddenList : visible;
+    const fresh = shot(ev);
+    insertSorted(target, fresh);
+    sync();
+    if (!target.hidden) expand(fresh);
+  };
+
+  if (events) render();
   api(`/api/alerts/${a.id}/events`)
-    .then((events) => {
-      if (!events.length) {
-        const msg = a.status === "waiting" ? "waitingSoon" : a.lastSweep ? "noScreenings" : "notChecked";
-        shots.replaceChildren(el("p", { class: "muted" }, t(msg)));
-        return;
-      }
-      shots.replaceChildren(
-        ...events.map((ev) => {
-          const fill = Math.min(1, Math.max(0, 1 - (ev.free || 0)));
-          return el(
-            "div",
-            { class: "shot" + (ev.soldOut ? " soldout" : "") },
-            el("span", { class: "when" }, fmtDateTime(ev.when)),
-            el("span", { class: "room", title: ev.room || "" }, ev.room || ""),
-            el("div", { class: "bar" }, el("div", { class: `fill ${fillClass(fill, ev.soldOut)}`, style: `width:${Math.round(fill * 100)}%` })),
-            el("span", { class: "pct" }, ev.soldOut ? t("soldOut") : t("pctSold", { n: Math.round(fill * 100) })),
-            ev.book ? el("a", { href: ev.book, target: "_blank", rel: "noopener" }, t("book")) : ""
-          );
-        })
-      );
+    .then((fetched) => {
+      if (JSON.stringify(fetched) === JSON.stringify(events)) return;
+      events = eventsCache[a.id] = fetched;
+      render();
     })
-    .catch((e) => shots.replaceChildren(el("p", { class: "error" }, errText(e))));
+    .catch((e) => {
+      if (!events) note.replaceWith(el("p", { class: "error" }, errText(e)));
+    });
+
+  const poster = el("div", { class: "poster" });
+  posterFor(a).then((src) => {
+    if (src) poster.append(el("img", { src, alt: "", loading: "lazy", onload: () => poster.classList.add("loaded") }));
+  });
+
+  const animate = justOpened === a.id;
+  justOpened = null;
   return el(
     "tr",
     { class: "details" },
@@ -513,21 +664,27 @@ function detailsRow(a) {
       { colspan: "9" },
       el(
         "div",
-        { class: "detail-grid" },
-        el("div", {}, el("h4", {}, t("d.alert")), props),
-        el("div", {}, el("h4", {}, t("d.tracked", { n: a.tracked })), shots)
+        { class: "detail-grid" + (animate ? " enter" : "") },
+        el("div", { class: "detail-alert" }, poster, el("div", {}, el("h4", {}, t("d.alert")), props)),
+        el("div", {}, heading, note, visible, toggleLine, hiddenList)
       )
     )
   );
 }
 
+let justOpened = null;
+
 function toggleDetails(a) {
   if (expanded.has(a.id)) expanded.delete(a.id);
-  else expanded.add(a.id);
+  else {
+    expanded.add(a.id);
+    justOpened = a.id;
+  }
   loadAlerts();
 }
 
 let lastAlerts = [];
+const seenIds = new Set();
 
 async function loadAlerts() {
   const rows = $("rows");
@@ -536,7 +693,16 @@ async function loadAlerts() {
   try {
     lastAlerts = await api("/api/alerts");
     for (const id of expanded) if (!lastAlerts.some((a) => a.id === id)) expanded.delete(id);
-    rows.replaceChildren(...lastAlerts.flatMap((a) => (expanded.has(a.id) ? [row(a), detailsRow(a)] : [row(a)])));
+    const firstLoad = seenIds.size === 0;
+    rows.replaceChildren(
+      ...lastAlerts.flatMap((a) => {
+        const tr = row(a);
+        if (!firstLoad && !seenIds.has(a.id)) tr.classList.add("enter");
+        return expanded.has(a.id) ? [tr, detailsRow(a, tr)] : [tr];
+      })
+    );
+    for (const a of lastAlerts) seenIds.add(a.id);
+    for (const id of Object.keys(eventsCache)) if (!expanded.has(id)) delete eventsCache[id];
     $("empty").hidden = lastAlerts.length > 0;
     $("alerts").hidden = lastAlerts.length === 0;
   } catch (e) {
@@ -545,10 +711,12 @@ async function loadAlerts() {
   }
 }
 
-async function removeAlert(a) {
+async function removeAlert(a, tr) {
   if (!confirm(t("confirmDelete", { film: a.film.name, cinema: a.cinema.name }))) return;
   try {
     await api(`/api/alerts/${a.id}`, { method: "DELETE" });
+    tr.classList.add("leave");
+    await new Promise((r) => setTimeout(r, 180));
     await loadAlerts();
   } catch (e) {
     alert(t("deleteFailed", { msg: errText(e) }));
@@ -563,6 +731,7 @@ async function runSweep() {
   clearTimeout(runStatusTimer);
   btn.disabled = true;
   status.classList.remove("error");
+  status.classList.add("show");
   status.textContent = t("running");
   try {
     const res = await api("/api/run", { method: "POST" });
@@ -573,7 +742,7 @@ async function runSweep() {
     status.classList.add("error");
   } finally {
     btn.disabled = false;
-    runStatusTimer = setTimeout(() => (status.textContent = ""), 8000);
+    runStatusTimer = setTimeout(() => status.classList.remove("show"), 8000);
   }
 }
 
@@ -719,7 +888,13 @@ const wz = {
     $("wz-next").disabled = !this.canAdvance();
     const body = $("wz-body");
     body.replaceChildren(el("p", { class: "muted" }, t("loading")));
-    this[STEP_KEYS[this.step]](body).catch((e) => body.replaceChildren(el("p", { class: "error" }, errText(e))));
+    body.classList.remove("enter");
+    this[STEP_KEYS[this.step]](body)
+      .then(() => {
+        body.getBoundingClientRect();
+        body.classList.add("enter");
+      })
+      .catch((e) => body.replaceChildren(el("p", { class: "error" }, errText(e))));
   },
 
   choiceButton(it, selected, onPick) {
@@ -883,7 +1058,7 @@ const wz = {
     if (d.dateFrom && d.dateTo && d.dateFrom > d.dateTo) return this.showError(t("err.order"));
     const payload = {
       country: d.country,
-      film: { id: d.film.id, name: d.film.name, releaseDate: d.film.releaseDate || null, comingSoon: Boolean(d.film.comingSoon) },
+      film: { id: d.film.id, name: d.film.name, releaseDate: d.film.releaseDate || null, comingSoon: Boolean(d.film.comingSoon), poster: d.film.posterLink || null },
       cinema: { id: d.cinema.id, name: d.cinema.name, imax: d.cinema.imax },
       attrs: [d.format, d.language].filter(Boolean),
       dateFrom: d.dateFrom || null,

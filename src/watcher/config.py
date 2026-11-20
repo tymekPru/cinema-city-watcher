@@ -61,6 +61,8 @@ class Config:
 
         self.ui_host = str(_require(raw, "ui.host"))
         self.ui_port = int(_require(raw, "ui.port"))
+        # Screenings with fewer seats sold than this get the "good seats" badge in the UI.
+        self.good_seats_max_sold = float(_require(raw, "ui.goodSeatsMaxSoldPercent"))
 
         self.ntfy_server = str(_require(raw, "notify.ntfy.server")).rstrip("/")
         self.ntfy_topic = str(_require(raw, "notify.ntfy.topic")).strip()
@@ -78,6 +80,7 @@ EDITABLE = {
     "alerts.cooldownMinutes": int,
     "runtime.pollIntervalSeconds": float,
     "runtime.dataDir": str,
+    "ui.goodSeatsMaxSoldPercent": float,
     "notify.ntfy.server": str,
     "notify.ntfy.topic": str,
     "notify.ntfy.token": str,
@@ -108,6 +111,8 @@ def _lookup(raw: dict, dotted: str):
 def _check(dotted: str, value) -> None:
     if dotted == "runtime.pollIntervalSeconds" and value < 1:
         raise ConfigError(f"{dotted} must be at least 1")
+    if dotted == "ui.goodSeatsMaxSoldPercent" and not 0 <= value <= 100:
+        raise ConfigError(f"{dotted} must be between 0 and 100")
     if dotted == "notify.ntfy.server" and not re.match(r"^https?://[^/\s]+", value):
         raise ConfigError(f"{dotted} must be an http(s) URL")
     if dotted == "notify.ntfy.topic" and value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
