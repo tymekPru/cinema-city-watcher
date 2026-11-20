@@ -16,12 +16,18 @@ class QuickbookApi:
 
     Catalogue lookups (films, cinemas, attributes) are cached for `cache_s` seconds
     because the UI asks for them often. Schedule lookups are never cached.
+
+    The same service also exposes the posters behind the site's "coming soon"
+    carousel at v1/poster/{tenant}/by-showing-type/FUTURE. Those films have no
+    tickets on sale yet, so quickbook does not know them; their `code` becomes the
+    quickbook film id once presale opens.
     """
 
     def __init__(
         self, base_url: str, lang: str, request_gap_s: float = 0.15, cache_s: float = 0
     ) -> None:
         self.base_url = base_url.rstrip("/")
+        self.service_url, self.tenant = self.base_url.rsplit("/quickbook/", 1)
         self.lang = lang
         self.request_gap_s = request_gap_s
         self.cache_s = cache_s
@@ -38,8 +44,9 @@ class QuickbookApi:
             wait = self._last_request + self.request_gap_s - time.monotonic()
             if wait > 0:
                 time.sleep(wait)
+            url = path if path.startswith("http") else f"{self.base_url}/{path}"
             req = urllib.request.Request(
-                f"{self.base_url}/{path}",
+                url,
                 headers={"User-Agent": UA, "Accept": "application/json"},
             )
             with urllib.request.urlopen(req, timeout=15) as resp:
@@ -50,11 +57,16 @@ class QuickbookApi:
                 self._cache[path] = (time.monotonic() + self.cache_s, body)
             return body
 
-    def films(self, until: str) -> list[dict]:
+    def films(self, until: str, fresh: bool = False) -> list[dict]:
         """Films with at least one event up to `until` (YYYY-MM-DD)."""
-        return self._get(f"films/until/{until}?attr=&lang={self.lang}", cache=True).get(
+        return self._get(f"films/until/{until}?attr=&lang={self.lang}", cache=not fresh).get(
             "films", []
         )
+
+    def coming_soon(self) -> list[dict]:
+        """Films announced but not on sale yet. The server returns at most 20."""
+        url = f"{self.service_url}/poster/{self.tenant}/by-showing-type/FUTURE?lang={self.lang}"
+        return self._get(url, cache=True).get("posters", [])
 
     def cinemas(self, until: str, attr: str = "") -> list[dict]:
         """Cinemas with at least one event up to `until`, optionally filtered by attribute."""

@@ -6,6 +6,7 @@ that memory, one entry per alert id:
 
     {
       "<alert id>": {
+        "on_sale": true,          # false while the film has no tickets on sale at all
         "events": {
           "<event id>": {
             "ratio":   0.12,      # baseline free-seat ratio used for comparison
@@ -15,7 +16,7 @@ that memory, one entry per alert id:
             "room":    "IMAX",
             "book":    "<booking link>",
             "seen":    "<first time this event was seen>",
-            "alerts":  {"NEW SEATS": "<last time this kind was sent>"}
+            "alerts":  {"SEATS FREED": "<last time this kind was sent>"}
           }
         },
         "last_sweep": "<end of the last completed sweep>",
@@ -24,13 +25,16 @@ that memory, one entry per alert id:
     }
 
 Alert kinds:
-    NEW SCREENING   a matching event not seen before
-    TICKETS BACK    the event was sold out and no longer is
-    NEW SEATS       free-seat ratio rose by at least min_ratio_delta above the baseline
+    NEW SCREENING   a matching event not seen before (always on)
+    SEATS FREED     only when the alert asks for seat changes: the event was sold
+                    out and no longer is, or its free-seat ratio rose by at least
+                    min_ratio_delta above the baseline
 
 Rules:
     1. The first sweep only records state and sends nothing. "First" means there is
        no last_sweep yet, not that events is empty, because rule 4 can empty events.
+       A film that is not on sale yet counts as swept, so its first screenings are
+       reported when they appear.
     2. The same alert kind for the same event is not repeated within cooldown_min.
     3. The baseline rises only when an alert is actually sent, and falls as soon as
        seats are sold. Otherwise a rise muted by the cooldown, or one too small on
@@ -52,6 +56,11 @@ except (ImportError, KeyError):
     # No zoneinfo or no tzdata installed. UTC only differs around midnight.
     LOCAL_TZ = timezone.utc
 
+# How far ahead an alert without an end date looks.
+HORIZON_DAYS = 365
+# Days scanned one by one when the list of days with events is unavailable.
+FALLBACK_SCAN_DAYS = 14
+
 
 def today() -> date:
     return datetime.now(LOCAL_TZ).date()
@@ -62,18 +71,33 @@ class Detector:
         self.min_ratio_delta = min_ratio_delta
         self.cooldown_min = cooldown_min
 
-    def sweep(self, api, alert: dict, data: dict, day: date) -> list[str]:
-        """One sweep for one alert. `data` is that alert's state, updated in place."""
+    def sweep(self, api, alert: dict, data: dict, day: date, on_sale=None) -> list[str]:
+        """One sweep for one alert. `data` is that alert's state, updated in place.
+
+        `on_sale` is the set of film ids currently on sale in the alert's country,
+        or None when it could not be fetched (the cinema is then scanned anyway).
+        """
         known = data.setdefault("events", {})
         first_run = "last_sweep" not in data
-        cinema_id = alert["cinema"]["id"]
         film_id = alert["film"]["id"]
+        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+        if on_sale is not None:
+            data["on_sale"] = film_id in on_sale
+            if not data["on_sale"]:
+                data["last_sweep"] = now
+                if first_run:
+                    print(f"[init] {alert['id']}: {alert['film']['name']} is not on sale yet, waiting")
+                return []
+
+        cinema_id = alert["cinema"]["id"]
         attrs = set(alert["attrs"])
         # The API combines several attributes with OR, so only one is sent
         # server-side; the rest are checked locally.
         server_attr = alert["attrs"][0] if alert["attrs"] else ""
-        start = max(day.isoformat(), alert["dateFrom"])
-        end = alert["dateTo"]
+        start = max(day.isoformat(), alert.get("dateFrom") or "")
+        end = alert.get("dateTo") or (day + timedelta(days=HORIZON_DAYS)).isoformat()
+        watch_seats = bool(alert.get("seatChanges"))
         texts: list[str] = []
 
         for d in self._dates_to_scan(api, cinema_id, start, end, server_attr):
@@ -87,7 +111,7 @@ class Detector:
                     continue
                 if not attrs <= set(ev.get("attributeIds", [])):
                     continue
-                text = self._check_event(ev, films.get(film_id, {}), known, first_run)
+                text = self._check_event(ev, films.get(film_id, {}), known, first_run, watch_seats)
                 if text:
                     texts.append(text)
 
@@ -95,7 +119,6 @@ class Detector:
         for eid in [k for k, v in known.items() if (v.get("when") or "9999")[:10] < cutoff]:
             del known[eid]
 
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
         data["last_sweep"] = now
         if texts:
             data["last_alert"] = now
@@ -107,12 +130,12 @@ class Detector:
         try:
             return [d for d in api.dates_with_events(cinema_id, end, attr) if start <= d <= end]
         except Exception as exc:  # noqa: BLE001
-            print(f"[warn] date list unavailable, scanning every day: {exc}")
+            print(f"[warn] date list unavailable, scanning the next {FALLBACK_SCAN_DAYS} days: {exc}")
         first = date.fromisoformat(start)
-        days = (date.fromisoformat(end) - first).days
+        days = min((date.fromisoformat(end) - first).days, FALLBACK_SCAN_DAYS - 1)
         return [(first + timedelta(days=o)).isoformat() for o in range(days + 1)]
 
-    def _check_event(self, ev: dict, film: dict, known: dict, first_run: bool):
+    def _check_event(self, ev: dict, film: dict, known: dict, first_run: bool, watch_seats: bool):
         eid = str(ev["id"])
         ratio = float(ev.get("availabilityRatio") or 0.0)
         sold_out = bool(ev.get("soldOut"))
@@ -135,10 +158,14 @@ class Detector:
             if first_run:
                 return None
             kind, extra = "NEW SCREENING", ""
+        elif not watch_seats:
+            # Nobody compares against the baseline, so keep it at the current value.
+            rec["ratio"] = ratio
+            return None
         elif prev.get("soldOut") and not sold_out and ratio >= self.min_ratio_delta:
-            kind, extra = "TICKETS BACK", ""
+            kind, extra = "SEATS FREED", " (was sold out)"
         elif ratio - prev_ratio >= self.min_ratio_delta:
-            kind, extra = "NEW SEATS", f" (+{ratio - prev_ratio:.1%})"
+            kind, extra = "SEATS FREED", f" (+{ratio - prev_ratio:.1%})"
         else:
             return None
 

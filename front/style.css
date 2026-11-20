@@ -57,7 +57,7 @@ p { margin: 0; }
 .error { color: var(--accent); font-size: 14px; }
 .empty { padding: 40px 16px; text-align: center; }
 
-.top, main { max-width: 1100px; margin: 0 auto; padding: 0 16px; }
+.top, main { max-width: 1200px; margin: 0 auto; padding: 0 16px; }
 .top {
   display: flex;
   align-items: center;
@@ -110,7 +110,7 @@ p { margin: 0; }
 /* ---- table ---- */
 .table-wrap { overflow-x: auto; }
 table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { padding: 12px 14px; text-align: left; vertical-align: middle; white-space: nowrap; }
+th, td { padding: 12px; text-align: left; vertical-align: middle; white-space: nowrap; }
 th {
   font-size: 12px;
   font-weight: 600;
@@ -124,6 +124,7 @@ td { border-bottom: 1px solid var(--border); }
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--surface-2); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+td.wrap { white-space: normal; min-width: 160px; }
 td .sub { display: block; font-size: 12px; color: var(--muted); margin-top: 2px; }
 td.actions { text-align: right; }
 td.actions .btn { padding: 5px 10px; font-size: 13px; }
@@ -134,11 +135,11 @@ td.actions .btn { padding: 5px 10px; font-size: 13px; }
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
-  text-transform: capitalize;
 }
 .pill.active { background: var(--ok-soft); color: var(--ok); }
 .pill.upcoming { background: var(--warn-soft); color: var(--warn); }
 .pill.expired { background: var(--off-soft); color: var(--off); }
+.pill.waiting { background: var(--accent-soft); color: var(--accent); }
 .tag {
   display: inline-block;
   padding: 1px 7px;
@@ -316,7 +317,7 @@ dl.props dd { margin: 0; }
 dl.props a { color: inherit; }
 .shots { display: flex; flex-direction: column; gap: 6px; }
 .shot {
-  display: grid; grid-template-columns: 130px minmax(90px, 1fr) 2fr 70px auto;
+  display: grid; grid-template-columns: 130px minmax(90px, 1fr) 2fr minmax(70px, auto) auto;
   gap: 12px; align-items: center; font-size: 13px;
   padding: 7px 10px; border-radius: 8px; background: var(--surface); border: 1px solid var(--border);
 }
@@ -338,3 +339,50 @@ dl.props a { color: inherit; }
 
 /* ---- settings form ---- */
 .field .help { display: block; font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+.error.ok { color: var(--ok); }
+.field select {
+  width: 100%;
+  font: inherit;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* ---- language switch ---- */
+.lang { display: inline-flex; gap: 4px; margin-right: 8px; }
+.lang button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px;
+  border-radius: 8px;
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity 0.12s, border-color 0.12s;
+  line-height: 0;
+}
+.lang button:hover { opacity: 0.85; }
+.lang button.active { opacity: 1; border-color: var(--border); background: var(--surface); }
+.lang svg { width: 28px; height: 18px; border-radius: 3px; border: 1px solid var(--border); display: block; }
+
+/* ---- options step ---- */
+.field .with-clear { display: flex; gap: 6px; align-items: center; }
+.field .with-clear input { flex: 1; min-width: 0; }
+.check {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-top: 18px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.check:hover { background: var(--surface-2); }
+.check input { margin: 3px 0 0; width: 16px; height: 16px; accent-color: var(--accent); flex: none; }
+.check .title { font-weight: 550; display: block; }
+.check .help { font-size: 13px; color: var(--muted); display: block; margin-top: 2px; }

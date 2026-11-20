@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
-from watcher.alerts import validate
+from watcher.alerts import DuplicateAlert, validate
 from watcher.config import ConfigError, read_editable, write_editable
 from watcher.detector import today
 from watcher.runner import App, build
@@ -48,7 +48,54 @@ def _film_view(film: dict) -> dict:
         "link": film.get("link"),
         "attributeIds": film.get("attributeIds", []),
         "languages": film.get("languages", {}),
+        "comingSoon": False,
     }
+
+
+def _coming_soon_view(poster: dict) -> dict:
+    return {
+        "id": poster.get("code"),
+        "name": poster.get("featureTitle"),
+        "releaseDate": (poster.get("dateStarted") or "")[:10],
+        "length": None,
+        "posterLink": poster.get("posterSrc"),
+        "link": poster.get("url"),
+        # Poster attributes carry genres and age ratings, not screening formats.
+        "attributeIds": [],
+        "languages": poster.get("languages", {}),
+        "comingSoon": True,
+    }
+
+
+def _films(api, until: str) -> list[dict]:
+    """Films on sale followed by announced ones, nearest release first."""
+    films = [_film_view(f) for f in api.films(until)]
+    known = {f["id"] for f in films}
+    try:
+        posters = api.coming_soon()
+    except Exception as exc:  # noqa: BLE001
+        print(f"[warn] coming-soon list unavailable: {exc}")
+        posters = []
+    soon = [
+        _coming_soon_view(p)
+        for p in posters
+        if p.get("code") and p.get("code") not in known and p.get("filmShowingType", "FUTURE") == "FUTURE"
+    ]
+    return films + sorted(soon, key=lambda f: f["releaseDate"])
+
+
+def _cinemas(api, until: str, formats: list[dict]) -> list[dict]:
+    """Cinemas with the screening formats each one currently offers."""
+    by_format = {f["id"]: {c["id"] for c in api.cinemas(until, f["id"])} for f in formats}
+    return [
+        {
+            "id": c["id"],
+            "name": c["displayName"],
+            "imax": c["id"] in by_format.get("imax", ()),
+            "formats": [fid for fid, ids in by_format.items() if c["id"] in ids],
+        }
+        for c in api.cinemas(until)
+    ]
 
 
 def _formats(attribute_groups: list[dict]) -> list[dict]:
@@ -89,32 +136,38 @@ class Handler(BaseHTTPRequestHandler):
                     return self._error(HTTPStatus.NOT_FOUND, "unknown country")
                 until = (today() + timedelta(days=365)).isoformat()
                 if parts[2] == "films":
-                    return self._json([_film_view(f) for f in api.films(until)])
+                    return self._json(_films(api, until))
                 if parts[2] == "cinemas":
-                    imax = {c["id"] for c in api.cinemas(until, "imax")}
-                    return self._json(
-                        [
-                            {"id": c["id"], "name": c["displayName"], "imax": c["id"] in imax}
-                            for c in api.cinemas(until)
-                        ]
-                    )
+                    return self._json(_cinemas(api, until, _formats(api.attributes())))
                 if parts[2] == "formats":
                     return self._json(_formats(api.attributes()))
             if path.startswith("/api/"):
                 return self._error(HTTPStatus.NOT_FOUND, "not found")
             self._static(path)
         except Exception as exc:  # noqa: BLE001
-            self._error(HTTPStatus.BAD_GATEWAY, f"upstream error: {exc}")
+            self._error(HTTPStatus.BAD_GATEWAY, f"upstream error: {exc}", code="upstream", detail=str(exc))
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/alerts":
+        path = urlparse(self.path).path
+        if path == "/api/notify/test":
+            return self._notify_test()
+        if path != "/api/alerts":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         try:
             payload = json.loads(self._body())
             alert = validate(payload, self.app.cfg.countries.keys(), today())
         except (ValueError, json.JSONDecodeError) as exc:
             return self._error(HTTPStatus.BAD_REQUEST, str(exc))
-        self._json(self.app.alerts.add(alert), HTTPStatus.CREATED)
+        try:
+            self._json(self.app.alerts.add(alert), HTTPStatus.CREATED)
+        except DuplicateAlert as exc:
+            self._error(
+                HTTPStatus.CONFLICT,
+                str(exc),
+                code="duplicate",
+                film=exc.existing["film"]["name"],
+                cinema=exc.existing["cinema"]["name"],
+            )
 
     def do_PUT(self) -> None:
         if urlparse(self.path).path != "/api/settings":
@@ -135,6 +188,22 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.NO_CONTENT)
         self.end_headers()
 
+    def _notify_test(self) -> None:
+        cfg = self.app.cfg
+        if not cfg.ntfy_topic:
+            return self._error(
+                HTTPStatus.BAD_REQUEST, "no ntfy topic configured, save one first", code="no_topic"
+            )
+        errors = self.app.notifier.send(
+            "cc-watcher test",
+            f"Notifications for this topic work.\nServer: {cfg.ntfy_server}\nTopic: {cfg.ntfy_topic}",
+        )
+        if errors:
+            return self._error(
+                HTTPStatus.BAD_GATEWAY, "; ".join(errors), code="notify_failed", detail="; ".join(errors)
+            )
+        self._json({"ok": True, "topic": cfg.ntfy_topic})
+
     # ---- views ----
 
     def _alerts_view(self) -> list[dict]:
@@ -143,9 +212,14 @@ class Handler(BaseHTTPRequestHandler):
         out = []
         for alert in self.app.alerts.load():
             st = state.get(alert["id"], {})
-            if alert["dateTo"] < day:
+            on_sale = st.get("on_sale")
+            if on_sale is None:
+                on_sale = not alert["film"].get("comingSoon")
+            if alert.get("dateTo") and alert["dateTo"] < day:
                 status = "expired"
-            elif alert["dateFrom"] > day:
+            elif not on_sale:
+                status = "waiting"
+            elif alert.get("dateFrom") and alert["dateFrom"] > day:
                 status = "upcoming"
             else:
                 status = "active"
@@ -153,6 +227,7 @@ class Handler(BaseHTTPRequestHandler):
                 {
                     **alert,
                     "status": status,
+                    "onSale": on_sale,
                     "lastSweep": st.get("last_sweep"),
                     "lastAlert": st.get("last_alert"),
                     "tracked": len(st.get("events", {})),
@@ -193,8 +268,9 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
-    def _error(self, status: HTTPStatus, message: str) -> None:
-        self._json({"error": message}, status)
+    def _error(self, status: HTTPStatus, message: str, **extra) -> None:
+        """`extra` carries a machine-readable code and parameters the UI can translate."""
+        self._json({"error": message, **extra}, status)
 
     def _static(self, path: str) -> None:
         front = FRONT_DIR

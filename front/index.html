@@ -9,12 +9,27 @@
 <body>
   <header class="top">
     <div>
-      <h1>Cinema City watcher</h1>
-      <p class="muted">Alerts for screenings, seats and returning tickets</p>
+      <h1 data-i18n="title">Cinema City watcher</h1>
+      <p class="muted" data-i18n="tagline">Alerts for new screenings and freed seats</p>
     </div>
     <div class="actions-top">
-      <button id="settings-open" class="btn">Settings</button>
-      <button id="add" class="btn primary">Add alert</button>
+      <div class="lang" role="group" aria-label="Language">
+        <button type="button" data-lang="pl" data-i18n-aria="lang.pl" aria-label="Polski">
+          <svg viewBox="0 0 16 10" aria-hidden="true"><rect width="16" height="5" fill="#fff"/><rect y="5" width="16" height="5" fill="#dc143c"/></svg>
+        </button>
+        <button type="button" data-lang="en" data-i18n-aria="lang.en" aria-label="English">
+          <svg viewBox="0 0 60 30" aria-hidden="true">
+            <clipPath id="uk"><path d="M0,0 v30 h60 v-30 z"/></clipPath>
+            <path d="M0,0 v30 h60 v-30 z" fill="#012169"/>
+            <path d="M0,0 L60,30 M60,0 L0,30" stroke="#fff" stroke-width="6"/>
+            <path d="M0,0 L60,30 M60,0 L0,30" clip-path="url(#uk)" stroke="#c8102e" stroke-width="4"/>
+            <path d="M30,0 v30 M0,15 h60" stroke="#fff" stroke-width="10"/>
+            <path d="M30,0 v30 M0,15 h60" stroke="#c8102e" stroke-width="6"/>
+          </svg>
+        </button>
+      </div>
+      <button id="settings-open" class="btn" data-i18n="settings">Settings</button>
+      <button id="add" class="btn primary" data-i18n="addAlert">Add alert</button>
     </div>
   </header>
 
@@ -24,21 +39,21 @@
         <table id="alerts">
           <thead>
             <tr>
-              <th>Film</th>
-              <th>Cinema</th>
-              <th>Format</th>
-              <th>Language</th>
-              <th>Dates</th>
-              <th>Status</th>
-              <th>Last check</th>
-              <th class="num">Tracked</th>
+              <th data-i18n="th.film">Film</th>
+              <th data-i18n="th.cinema">Cinema</th>
+              <th data-i18n="th.format">Format</th>
+              <th data-i18n="th.language">Language</th>
+              <th data-i18n="th.dates">Dates</th>
+              <th data-i18n="th.status">Status</th>
+              <th data-i18n="th.lastCheck">Last check</th>
+              <th class="num" data-i18n="th.tracked">Tracked</th>
               <th></th>
             </tr>
           </thead>
           <tbody id="rows"></tbody>
         </table>
       </div>
-      <p id="empty" class="empty muted" hidden>No alerts yet. Add one to start watching.</p>
+      <p id="empty" class="empty muted" hidden data-i18n="empty">No alerts yet. Add one to start watching.</p>
       <p id="load-error" class="error" hidden></p>
     </section>
   </main>
@@ -46,14 +61,14 @@
   <div id="wizard" class="modal" hidden>
     <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="wz-title">
       <header class="dialog-head">
-        <h2 id="wz-title">New alert</h2>
-        <button id="wz-close" class="icon" aria-label="Close">&times;</button>
+        <h2 id="wz-title" data-i18n="newAlert">New alert</h2>
+        <button id="wz-close" class="icon" data-i18n-aria="close" aria-label="Close">&times;</button>
       </header>
       <ol id="steps" class="steps"></ol>
       <div id="wz-body" class="wz-body"></div>
       <p id="wz-error" class="error" hidden></p>
       <footer class="dialog-foot">
-        <button id="wz-back" class="btn">Back</button>
+        <button id="wz-back" class="btn" data-i18n="back">Back</button>
         <span class="spacer"></span>
         <button id="wz-next" class="btn primary">Next</button>
       </footer>
@@ -63,17 +78,18 @@
   <div id="settings" class="modal" hidden>
     <div class="dialog narrow" role="dialog" aria-modal="true" aria-labelledby="st-title">
       <header class="dialog-head">
-        <h2 id="st-title">Settings</h2>
-        <button id="st-close" class="icon" aria-label="Close">&times;</button>
+        <h2 id="st-title" data-i18n="settings">Settings</h2>
+        <button id="st-close" class="icon" data-i18n-aria="close" aria-label="Close">&times;</button>
       </header>
       <div class="wz-body">
-        <p class="hint muted">Saved to appsettings.json. A running watcher picks changes up on its next sweep.</p>
+        <p class="hint muted" data-i18n="st.hint">Saved to appsettings.json. A running watcher picks changes up on its next sweep. Notifications go to the console and, when a topic is set, to ntfy.</p>
         <div id="st-fields" class="fields"></div>
       </div>
       <p id="st-error" class="error" hidden></p>
       <footer class="dialog-foot">
+        <button id="st-test" class="btn" data-i18n="st.saveTest">Save &amp; send test</button>
         <span class="spacer"></span>
-        <button id="st-save" class="btn primary">Save</button>
+        <button id="st-save" class="btn primary" data-i18n="st.save">Save</button>
       </footer>
     </div>
   </div>

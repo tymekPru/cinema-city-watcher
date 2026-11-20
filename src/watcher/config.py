@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 
@@ -61,6 +62,13 @@ class Config:
         self.ui_host = str(_require(raw, "ui.host"))
         self.ui_port = int(_require(raw, "ui.port"))
 
+        self.ntfy_server = str(_require(raw, "notify.ntfy.server")).rstrip("/")
+        self.ntfy_topic = str(_require(raw, "notify.ntfy.topic")).strip()
+        self.ntfy_token = str(_require(raw, "notify.ntfy.token")).strip()
+        self.ntfy_priority = str(_require(raw, "notify.ntfy.priority")).strip() or "default"
+
+
+NTFY_PRIORITIES = ("min", "low", "default", "high", "urgent")
 
 # Settings the UI may change, with the type each value is coerced to.
 EDITABLE = {
@@ -70,15 +78,49 @@ EDITABLE = {
     "alerts.cooldownMinutes": int,
     "runtime.pollIntervalSeconds": float,
     "runtime.dataDir": str,
+    "notify.ntfy.server": str,
+    "notify.ntfy.topic": str,
+    "notify.ntfy.token": str,
+    "notify.ntfy.priority": str,
 }
+# Keys that may be left empty.
+OPTIONAL = {"notify.ntfy.topic", "notify.ntfy.token"}
+
+
+def _set(raw: dict, dotted: str, value) -> None:
+    node = raw
+    parts = dotted.split(".")
+    for part in parts[:-1]:
+        node = node.setdefault(part, {})
+    node[parts[-1]] = value
+
+
+def _lookup(raw: dict, dotted: str):
+    """Like _require but returns None when the key is absent."""
+    node = raw
+    for part in dotted.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def _check(dotted: str, value) -> None:
+    if dotted == "runtime.pollIntervalSeconds" and value < 1:
+        raise ConfigError(f"{dotted} must be at least 1")
+    if dotted == "notify.ntfy.server" and not re.match(r"^https?://[^/\s]+", value):
+        raise ConfigError(f"{dotted} must be an http(s) URL")
+    if dotted == "notify.ntfy.topic" and value and not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", value):
+        raise ConfigError(f"{dotted} may only contain letters, digits, - and _ (max 64)")
+    if dotted == "notify.ntfy.priority" and value not in NTFY_PRIORITIES:
+        raise ConfigError(f"{dotted} must be one of {', '.join(NTFY_PRIORITIES)}")
 
 
 def read_editable(path) -> dict:
     raw = json.loads(Path(path).read_text(encoding="utf-8"))
     out: dict = {}
     for dotted in EDITABLE:
-        section, key = dotted.split(".")
-        out.setdefault(section, {})[key] = _require(raw, dotted)
+        _set(out, dotted, _require(raw, dotted))
     return out
 
 
@@ -89,22 +131,22 @@ def write_editable(path, patch: dict) -> dict:
     if not isinstance(patch, dict):
         raise ConfigError("body must be a JSON object")
     for dotted, typ in EDITABLE.items():
-        section, key = dotted.split(".")
-        if not isinstance(patch.get(section), dict) or key not in patch[section]:
+        value = _lookup(patch, dotted)
+        if value is None:
             continue
-        value = patch[section][key]
         try:
             value = typ(value)
         except (TypeError, ValueError):
             kind = {int: "an integer", float: "a number", str: "text"}[typ]
             raise ConfigError(f"{dotted} must be {kind}") from None
-        if typ is str and not value.strip():
-            raise ConfigError(f"{dotted} must not be empty")
-        if typ is not str and value < 0:
+        if typ is str:
+            value = value.strip()
+            if not value and dotted not in OPTIONAL:
+                raise ConfigError(f"{dotted} must not be empty")
+        elif value < 0:
             raise ConfigError(f"{dotted} must not be negative")
-        if dotted == "runtime.pollIntervalSeconds" and value < 1:
-            raise ConfigError(f"{dotted} must be at least 1")
-        raw.setdefault(section, {})[key] = value
+        _check(dotted, value)
+        _set(raw, dotted, value)
     tmp = path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(raw, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     tmp.replace(path)

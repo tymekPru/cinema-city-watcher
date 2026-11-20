@@ -6,20 +6,37 @@ alerts.json is a plain list:
       {
         "id": "3f9a1c2b",
         "country": "pl",
-        "film":   {"id": "7460s2r", "name": "Odyseja"},
+        "film":   {"id": "7460s2r", "name": "Odyseja", "releaseDate": "2026-12-18", "comingSoon": false},
         "cinema": {"id": "1060", "name": "Warszawa - Sadyba", "imax": true},
         "attrs":  ["imax", "subbed"],
-        "dateFrom": "2026-11-18",
-        "dateTo":   "2026-12-31",
-        "createdAt": "2026-11-17T21:00:00+00:00"
+        "dateFrom": "2026-11-18",      # or null: no lower bound
+        "dateTo":   "2026-12-31",      # or null: no upper bound
+        "seatChanges": false,          # also report seats freed on known screenings
+        "createdAt": "2026-11-17T21:00:00+00:00",
+        "hash": "0c3b5e3a9d2f1c47"
       }
     ]
+
+New screenings are always reported. `comingSoon` marks a film picked from the
+coming-soon list before tickets were on sale; the watcher waits for it to appear.
+`hash` fingerprints everything the user chose so the same alert cannot be
+created twice.
 """
 
+import hashlib
 import json
 import uuid
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+
+def _optional_date(value, name: str):
+    if value in (None, ""):
+        return None
+    try:
+        return date.fromisoformat(str(value))
+    except ValueError:
+        raise ValueError(f"{name} must be YYYY-MM-DD") from None
 
 
 def validate(payload, country_codes, today: date) -> dict:
@@ -38,27 +55,77 @@ def validate(payload, country_codes, today: date) -> dict:
     attrs = payload.get("attrs") or []
     if not isinstance(attrs, list) or not all(isinstance(a, str) for a in attrs):
         raise ValueError("attrs must be a list of strings")
-    try:
-        date_from = date.fromisoformat(str(payload.get("dateFrom") or ""))
-        date_to = date.fromisoformat(str(payload.get("dateTo") or ""))
-    except ValueError:
-        raise ValueError("dateFrom and dateTo must be YYYY-MM-DD") from None
-    if date_from > date_to:
+    date_from = _optional_date(payload.get("dateFrom"), "dateFrom")
+    date_to = _optional_date(payload.get("dateTo"), "dateTo")
+    if date_from and date_to and date_from > date_to:
         raise ValueError("dateFrom must not be after dateTo")
-    if date_to < today:
+    if date_to and date_to < today:
         raise ValueError("dateTo is in the past")
+    release = _optional_date(film.get("releaseDate"), "film.releaseDate")
     return {
         "country": country,
-        "film": {"id": str(film["id"]), "name": str(film["name"])},
+        "film": {
+            "id": str(film["id"]),
+            "name": str(film["name"]),
+            "releaseDate": release.isoformat() if release else None,
+            "comingSoon": bool(film.get("comingSoon")),
+        },
         "cinema": {
             "id": str(cinema["id"]),
             "name": str(cinema["name"]),
             "imax": bool(cinema.get("imax")),
         },
         "attrs": [a.strip() for a in attrs if a.strip()],
-        "dateFrom": date_from.isoformat(),
-        "dateTo": date_to.isoformat(),
+        "dateFrom": date_from.isoformat() if date_from else None,
+        "dateTo": date_to.isoformat() if date_to else None,
+        "seatChanges": bool(payload.get("seatChanges")),
     }
+
+
+def fingerprint(alert: dict) -> str:
+    key = {
+        "country": alert["country"],
+        "film": alert["film"]["id"],
+        "cinema": alert["cinema"]["id"],
+        "attrs": sorted(alert.get("attrs", [])),
+        "dateFrom": alert.get("dateFrom"),
+        "dateTo": alert.get("dateTo"),
+        "seatChanges": bool(alert.get("seatChanges")),
+    }
+    raw = json.dumps(key, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(raw).hexdigest()[:16]
+
+
+def date_range_text(alert: dict) -> str:
+    start, end = alert.get("dateFrom"), alert.get("dateTo")
+    if start and end:
+        return f"{start} to {end}"
+    if start:
+        return f"from {start}"
+    if end:
+        return f"until {end}"
+    return "any dates"
+
+
+class DuplicateAlert(ValueError):
+    def __init__(self, existing: dict) -> None:
+        super().__init__(
+            f"an identical alert already exists: {existing['film']['name']} "
+            f"at {existing['cinema']['name']} ({date_range_text(existing)})"
+        )
+        self.existing = existing
+
+
+def _normalise(alert: dict) -> dict:
+    """Fill in keys added after the alert was written and refresh its fingerprint."""
+    alert.setdefault("dateFrom", None)
+    alert.setdefault("dateTo", None)
+    # Alerts from before this flag existed reported seat changes, so keep doing that.
+    alert.setdefault("seatChanges", True)
+    alert["film"].setdefault("releaseDate", None)
+    alert["film"].setdefault("comingSoon", False)
+    alert["hash"] = fingerprint(alert)
+    return alert
 
 
 class AlertStore:
@@ -68,7 +135,8 @@ class AlertStore:
     def load(self) -> list[dict]:
         if not self.path.exists():
             return []
-        return json.loads(self.path.read_text(encoding="utf-8"))
+        alerts = json.loads(self.path.read_text(encoding="utf-8"))
+        return [_normalise(a) for a in alerts]
 
     def save(self, alerts: list[dict]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -78,9 +146,13 @@ class AlertStore:
 
     def add(self, alert: dict) -> dict:
         alert = dict(alert)
+        alert["hash"] = fingerprint(alert)
+        alerts = self.load()
+        for existing in alerts:
+            if existing["hash"] == alert["hash"]:
+                raise DuplicateAlert(existing)
         alert["id"] = uuid.uuid4().hex[:8]
         alert["createdAt"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        alerts = self.load()
         alerts.append(alert)
         self.save(alerts)
         return alert
