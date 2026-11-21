@@ -165,6 +165,34 @@ class AlertStore:
         self.save(alerts)
         return alert
 
+    def update(self, alert_id: str, alert: dict) -> tuple[dict, bool]:
+        """Replace an alert's settings, keeping its id and creation time.
+
+        Returns the stored alert and whether what it watches changed (film, cinema
+        or attributes). In that case the caller should drop the alert's state so
+        the next sweep starts fresh, and hidden screenings are forgotten.
+        """
+        alert = dict(alert)
+        alert["hash"] = fingerprint(alert)
+        alerts = self.load()
+        current = next((a for a in alerts if a.get("id") == alert_id), None)
+        if current is None:
+            raise KeyError(alert_id)
+        for existing in alerts:
+            if existing is not current and existing["hash"] == alert["hash"]:
+                raise DuplicateAlert(existing)
+        same_target = (
+            current["film"]["id"] == alert["film"]["id"]
+            and current["cinema"]["id"] == alert["cinema"]["id"]
+            and sorted(current["attrs"]) == sorted(alert["attrs"])
+        )
+        alert["id"] = current["id"]
+        alert["createdAt"] = current.get("createdAt")
+        alert["hiddenEvents"] = current.get("hiddenEvents", []) if same_target else []
+        alerts[alerts.index(current)] = alert
+        self.save(alerts)
+        return alert, not same_target
+
     def set_hidden(self, alert_id: str, event_id: str, hidden: bool, tracked_ids) -> list[str]:
         """Hide or unhide one screening. Ids no longer tracked are dropped on the way."""
         alerts = self.load()

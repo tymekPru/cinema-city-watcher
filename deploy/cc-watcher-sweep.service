@@ -1,0 +1,10 @@
+[Unit]
+Description=Cinema City watcher: one sweep over all alerts
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ccwatcher
+WorkingDirectory=/opt/cinema-city-watcher
+ExecStart=/usr/bin/python3 src/main.py

@@ -5,6 +5,7 @@ from .alerts import AlertStore
 from .api import QuickbookApi
 from .config import Config, ConfigError
 from .detector import HORIZON_DAYS, Detector, today
+from .lock import SweepLock
 from .notify import make_notifier
 from .state import FileState
 
@@ -25,6 +26,7 @@ class App:
         self.state = FileState(cfg.state_file)
         self.detector = Detector(cfg.min_ratio_delta, cfg.cooldown_min)
         self.notifier = make_notifier(cfg)
+        self.lock = SweepLock(cfg.lock_file)
         self._loaded_mtime = self.config_path.stat().st_mtime_ns
 
     def reload_if_changed(self) -> None:
@@ -41,9 +43,20 @@ class App:
         except ConfigError as exc:
             print(f"[warn] settings not reloaded: {exc}")
 
-    def run_once(self) -> int:
-        """Sweep every active alert. Each alert with changes gets one notification."""
+    def run_once(self, wait: bool = True) -> int:
+        """Sweep every active alert. Each alert with changes gets one notification.
+
+        Only one sweep runs at a time, also across processes. With `wait` the
+        call blocks until the other sweep finishes; without it SweepBusy is raised.
+        """
         self.reload_if_changed()
+        self.lock.acquire(wait)
+        try:
+            return self._sweep()
+        finally:
+            self.lock.release()
+
+    def _sweep(self) -> int:
         day = today()
         alerts = self.alerts.load()
         state = self.state.load()

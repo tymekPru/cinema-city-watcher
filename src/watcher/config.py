@@ -58,6 +58,7 @@ class Config:
         self.data_dir = data_dir if data_dir.is_absolute() else self.path.parent / data_dir
         self.alerts_file = self.data_dir / "alerts.json"
         self.state_file = self.data_dir / "state.json"
+        self.lock_file = self.data_dir / "sweep.lock"
 
         self.ui_host = str(_require(raw, "ui.host"))
         self.ui_port = int(_require(raw, "ui.port"))

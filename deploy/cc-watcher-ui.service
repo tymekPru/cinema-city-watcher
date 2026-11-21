@@ -1,0 +1,13 @@
+[Unit]
+Description=Cinema City watcher: web UI on 127.0.0.1:8080
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ccwatcher
+WorkingDirectory=/opt/cinema-city-watcher
+ExecStart=/usr/bin/python3 src/serve.py
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

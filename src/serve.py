@@ -1,6 +1,6 @@
 """Web UI for managing alerts.
 
-    python src/serve.py [--config PATH]
+    python src/serve.py [--config PATH] [--host ADDR] [--port N]
 
 Serves the static front-end from front/ and a small JSON API on top of the same
 settings and data files the watcher uses. Standard library only.
@@ -10,7 +10,6 @@ import argparse
 import json
 import mimetypes
 import sys
-import threading
 import time
 from datetime import timedelta
 from http import HTTPStatus
@@ -21,6 +20,7 @@ from urllib.parse import urlparse
 from watcher.alerts import DuplicateAlert, validate
 from watcher.config import ConfigError, read_editable, write_editable
 from watcher.detector import today
+from watcher.lock import SweepBusy
 from watcher.runner import App, build
 
 DEFAULT_CONFIG = Path(__file__).resolve().parent.parent / "appsettings.json"
@@ -111,7 +111,6 @@ def _formats(attribute_groups: list[dict]) -> list[dict]:
 
 class Handler(BaseHTTPRequestHandler):
     app: App  # set by serve()
-    sweep_lock = threading.Lock()
 
     def log_message(self, fmt, *args) -> None:
         print(f"[{time.strftime('%H:%M:%S')}] {self.command} {self.path} {args[1]}")
@@ -155,28 +154,77 @@ class Handler(BaseHTTPRequestHandler):
             return self._notify_test()
         if path == "/api/run":
             return self._run_sweep()
+        parts = path.strip("/").split("/")
+        if len(parts) == 4 and parts[:2] == ["api", "alerts"] and parts[3] == "test":
+            return self._alert_test(parts[2])
         if path != "/api/alerts":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
-        try:
-            payload = json.loads(self._body())
-            alert = validate(payload, self.app.cfg.countries.keys(), today())
-        except (ValueError, json.JSONDecodeError) as exc:
-            return self._error(HTTPStatus.BAD_REQUEST, str(exc))
+        alert = self._alert_from_body()
+        if alert is None:
+            return
         try:
             self._json(self.app.alerts.add(alert), HTTPStatus.CREATED)
         except DuplicateAlert as exc:
-            self._error(
-                HTTPStatus.CONFLICT,
-                str(exc),
-                code="duplicate",
-                film=exc.existing["film"]["name"],
-                cinema=exc.existing["cinema"]["name"],
-            )
+            self._duplicate(exc)
+
+    def _alert_from_body(self):
+        try:
+            return validate(json.loads(self._body()), self.app.cfg.countries.keys(), today())
+        except (ValueError, json.JSONDecodeError) as exc:
+            self._error(HTTPStatus.BAD_REQUEST, str(exc))
+            return None
+
+    def _duplicate(self, exc: DuplicateAlert) -> None:
+        self._error(
+            HTTPStatus.CONFLICT,
+            str(exc),
+            code="duplicate",
+            film=exc.existing["film"]["name"],
+            cinema=exc.existing["cinema"]["name"],
+        )
+
+    def _update_alert(self, alert_id: str) -> None:
+        alert = self._alert_from_body()
+        if alert is None:
+            return
+        try:
+            saved, reset = self.app.alerts.update(alert_id, alert)
+        except KeyError:
+            return self._error(HTTPStatus.NOT_FOUND, "no such alert")
+        except DuplicateAlert as exc:
+            return self._duplicate(exc)
+        if reset:
+            # The alert watches something else now; forget what it knew. Under the
+            # sweep lock so a running sweep cannot write the old state back.
+            with self.app.lock:
+                state = self.app.state.load()
+                if state.pop(alert_id, None) is not None:
+                    self.app.state.save(state)
+        self._json(saved)
+
+    def _alert_test(self, alert_id: str) -> None:
+        """Send a sample notification shaped like a real one for this alert."""
+        alert = next((a for a in self.app.alerts.load() if a.get("id") == alert_id), None)
+        if alert is None:
+            return self._error(HTTPStatus.NOT_FOUND, "no such alert")
+        if not self.app.cfg.ntfy_topic:
+            return self._error(HTTPStatus.BAD_REQUEST, "no ntfy topic configured, save one first", code="no_topic")
+        when = f"{today().isoformat()} 20:00"
+        body = (
+            f"TEST NEW SCREENING: {alert['film']['name']} | {when} | {alert['cinema']['name']} | free ~100.0%\n"
+            f"  This is a test. Real alerts for this screening look like this."
+        )
+        errors = self.app.notifier.send(f"{alert['film']['name']} @ {alert['cinema']['name']}", body)
+        if errors:
+            return self._error(HTTPStatus.BAD_GATEWAY, "; ".join(errors), code="notify_failed", detail="; ".join(errors))
+        self._json({"ok": True})
 
     def do_PUT(self) -> None:
         parts = urlparse(self.path).path.strip("/").split("/")
         if len(parts) == 5 and parts[:2] == ["api", "alerts"] and parts[3] == "events":
             return self._set_hidden(parts[2], parts[4])
+        if len(parts) == 3 and parts[:2] == ["api", "alerts"]:
+            return self._update_alert(parts[2])
         if urlparse(self.path).path != "/api/settings":
             return self._error(HTTPStatus.NOT_FOUND, "not found")
         try:
@@ -213,14 +261,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _run_sweep(self) -> None:
         """One sweep on demand, same as `python src/main.py` but inside this process."""
-        if not self.sweep_lock.acquire(blocking=False):
-            return self._error(HTTPStatus.CONFLICT, "a sweep is already running", code="busy")
         try:
-            sent = self.app.run_once()
+            sent = self.app.run_once(wait=False)
+        except SweepBusy:
+            return self._error(HTTPStatus.CONFLICT, "a sweep is already running", code="busy")
         except Exception as exc:  # noqa: BLE001
             return self._error(HTTPStatus.INTERNAL_SERVER_ERROR, f"sweep failed: {exc}", code="run_failed", detail=str(exc))
-        finally:
-            self.sweep_lock.release()
         self._json({"alerts": sent})
 
     def _set_hidden(self, alert_id: str, event_id: str) -> None:
@@ -334,7 +380,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(raw)
 
 
-def serve(config_path) -> int:
+def serve(config_path, host: str = "", port: int = 0) -> int:
     try:
         app = build(config_path)
     except ConfigError as exc:
@@ -342,8 +388,10 @@ def serve(config_path) -> int:
         return 2
     Handler.app = app
     sys.stdout.reconfigure(line_buffering=True)
-    server = ThreadingHTTPServer((app.cfg.ui_host, app.cfg.ui_port), Handler)
-    print(f"UI at http://{app.cfg.ui_host}:{app.cfg.ui_port}  (config={app.cfg.path})")
+    host = host or app.cfg.ui_host
+    port = port or app.cfg.ui_port
+    server = ThreadingHTTPServer((host, port), Handler)
+    print(f"UI at http://{host}:{port}  (config={app.cfg.path})")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -356,4 +404,7 @@ def serve(config_path) -> int:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Cinema City watcher UI")
     parser.add_argument("--config", default=str(DEFAULT_CONFIG), help="path to the settings file")
-    sys.exit(serve(parser.parse_args().config))
+    parser.add_argument("--host", default="", help="listen address, overrides ui.host (containers need 0.0.0.0)")
+    parser.add_argument("--port", type=int, default=0, help="listen port, overrides ui.port")
+    args = parser.parse_args()
+    sys.exit(serve(args.config, args.host, args.port))

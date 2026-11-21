@@ -1,0 +1,2 @@
+# The watcher itself needs nothing beyond the standard library. This is for the tests only.
+pytest==9.1.1

@@ -209,6 +209,8 @@ td.actions .btn { padding: 5px 10px; font-size: 13px; }
   transition: background 0.15s, color 0.15s;
 }
 .steps li.done { color: var(--text); }
+.steps li.link { cursor: pointer; }
+.steps li.link:hover { background: var(--border); color: var(--text); }
 .steps li.current { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 .wz-body { padding: 16px 20px; overflow-y: auto; min-height: 240px; }
@@ -328,6 +330,7 @@ tr.details td { padding: 0 14px 18px; white-space: normal; background: var(--sur
 .poster img { width: 72px; height: 104px; object-fit: cover; border-radius: 8px; display: block; opacity: 0; transition: opacity 0.3s ease; }
 .poster.loaded img { opacity: 1; }
 .poster:empty { display: none; }
+.detail-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; font-size: 13px; }
 tr.details:hover td { background: var(--surface-2); }
 .detail-grid { display: grid; grid-template-columns: minmax(220px, 1fr) 2fr; gap: 20px; padding-top: 6px; }
 .detail-grid h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); font-weight: 600; }

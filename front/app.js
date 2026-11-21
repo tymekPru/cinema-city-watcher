@@ -151,6 +151,12 @@ const I18N = {
     "st.goodSeats.help": "Screenings with fewer seats sold than this get a green badge.",
     "goodSeats": "{n} screenings under {p}% sold",
     "goodSeat": "under {p}% sold",
+    "edit": "Edit",
+    "editAlert": "Edit alert",
+    "saveChanges": "Save changes",
+    "sendTest": "Send test notification",
+    "sending": "Sending\u2026",
+    "testSentAlert": "Test sent.",
     "hide": "Hide",
     "unhide": "Unhide",
     "hiddenCount": "{n} hidden",
@@ -305,6 +311,12 @@ const I18N = {
     "st.goodSeats.help": "Seanse ze sprzedażą poniżej tego progu dostają zielone oznaczenie.",
     "goodSeats": "{n} seansów ze sprzedażą poniżej {p}%",
     "goodSeat": "sprzedano mniej niż {p}%",
+    "edit": "Edytuj",
+    "editAlert": "Edytuj alert",
+    "saveChanges": "Zapisz zmiany",
+    "sendTest": "Wyślij testowe powiadomienie",
+    "sending": "Wysyłanie\u2026",
+    "testSentAlert": "Test wysłany.",
     "hide": "Ukryj",
     "unhide": "Przywróć",
     "hiddenCount": "ukryte: {n}",
@@ -649,6 +661,22 @@ function detailsRow(a, tr) {
       if (!events) note.replaceWith(el("p", { class: "error" }, errText(e)));
     });
 
+  const testStatus = el("span", { class: "muted" });
+  const testBtn = el("button", { class: "btn mini", onclick: async () => {
+    testBtn.disabled = true;
+    testStatus.classList.remove("error");
+    testStatus.textContent = t("sending");
+    try {
+      await api(`/api/alerts/${a.id}/test`, { method: "POST" });
+      testStatus.textContent = t("testSentAlert");
+    } catch (e) {
+      testStatus.textContent = errText(e);
+      testStatus.classList.add("error");
+    } finally {
+      testBtn.disabled = false;
+    }
+  } }, t("sendTest"));
+  const actions = el("div", { class: "detail-actions" }, el("button", { class: "btn mini", onclick: () => wz.open(a) }, t("edit")), testBtn, testStatus);
   const poster = el("div", { class: "poster" });
   posterFor(a).then((src) => {
     if (src) poster.append(el("img", { src, alt: "", loading: "lazy", onload: () => poster.classList.add("loaded") }));
@@ -665,7 +693,7 @@ function detailsRow(a, tr) {
       el(
         "div",
         { class: "detail-grid" + (animate ? " enter" : "") },
-        el("div", { class: "detail-alert" }, poster, el("div", {}, el("h4", {}, t("d.alert")), props)),
+        el("div", { class: "detail-alert" }, poster, el("div", {}, el("h4", {}, t("d.alert")), props, actions)),
         el("div", {}, heading, note, visible, toggleLine, hiddenList)
       )
     )
@@ -830,12 +858,39 @@ const wz = {
   step: 0,
   draft: {},
   cache: {},
-  open() {
+  editing: null,
+  open(alert = null) {
     this.step = 0;
     this.draft = { dateFrom: null, dateTo: null, seatChanges: false };
     this.cache = {};
+    this.editing = alert ? alert.id : null;
+    $("wz-title").textContent = t(alert ? "editAlert" : "newAlert");
+    this.showError("");
     $("wizard").hidden = false;
-    this.render();
+    if (!alert) return this.render();
+    // Show a loader until the catalogue is in and the draft is rebuilt; only then draw the step.
+    $("steps").replaceChildren();
+    $("wz-body").replaceChildren(el("p", { class: "muted" }, t("loading")));
+    $("wz-back").disabled = $("wz-next").disabled = true;
+    this.prefill(alert).then(() => this.render()).catch((e) => this.showError(errText(e)));
+  },
+  // Rebuild a draft from a stored alert. The catalogue entries carry what the
+  // steps need (formats, languages); a film or cinema no longer listed falls
+  // back to the stored copy with unknown formats.
+  async prefill(a) {
+    const [films, cinemas] = await Promise.all([this.fetch(`/api/${a.country}/films`), this.fetch(`/api/${a.country}/cinemas`)]);
+    const { format, language } = splitAttrs(a.attrs);
+    this.draft = {
+      country: a.country,
+      film: films.find((f) => f.id === a.film.id) || { ...a.film, posterLink: a.film.poster, attributeIds: null, languages: {} },
+      cinema: cinemas.find((c) => c.id === a.cinema.id) || { ...a.cinema, formats: null },
+      format: format || "",
+      language: language || "",
+      dateFrom: a.dateFrom,
+      dateTo: a.dateTo,
+      seatChanges: Boolean(a.seatChanges),
+    };
+    this.step = STEP_KEYS.length - 1;
   },
   close() {
     $("wizard").hidden = true;
@@ -844,9 +899,24 @@ const wz = {
     $("wz-error").textContent = msg || "";
     $("wz-error").hidden = !msg;
   },
-  canAdvance() {
+  // Whether step `i` has what it needs; the last step always does.
+  filled(i) {
     const d = this.draft;
-    return Boolean([d.country, d.film, d.cinema, "format" in d, "language" in d, true][this.step]);
+    return Boolean([d.country, d.film, d.cinema, "format" in d, "language" in d, true][i]);
+  },
+  canAdvance() {
+    return this.filled(this.step);
+  },
+  // A step can be jumped to when every step before it is filled.
+  reachable(i) {
+    for (let j = 0; j < i; j++) if (!this.filled(j)) return false;
+    return true;
+  },
+  goTo(i) {
+    if (i === this.step || !this.reachable(i)) return;
+    this.showError("");
+    this.step = i;
+    this.render();
   },
   async next() {
     this.showError("");
@@ -881,10 +951,13 @@ const wz = {
   },
   render() {
     $("steps").replaceChildren(
-      ...STEP_KEYS.map((k, i) => el("li", { class: i < this.step ? "done" : i === this.step ? "current" : "" }, `${i + 1}. ${t("step." + k)}`))
+      ...STEP_KEYS.map((k, i) => {
+        const cls = [i < this.step ? "done" : i === this.step ? "current" : "", i !== this.step && this.reachable(i) ? "link" : ""].filter(Boolean).join(" ");
+        return el("li", { class: cls, onclick: () => this.goTo(i) }, `${i + 1}. ${t("step." + k)}`);
+      })
     );
     $("wz-back").disabled = this.step === 0;
-    $("wz-next").textContent = this.step === STEP_KEYS.length - 1 ? t("saveAlert") : t("next");
+    $("wz-next").textContent = this.step === STEP_KEYS.length - 1 ? t(this.editing ? "saveChanges" : "saveAlert") : t("next");
     $("wz-next").disabled = !this.canAdvance();
     const body = $("wz-body");
     body.replaceChildren(el("p", { class: "muted" }, t("loading")));
@@ -937,7 +1010,7 @@ const wz = {
     const list = el("div", { class: "choices" });
     const meta = (f) => {
       const parts = [f.releaseDate && t("movie.release", { d: fmtDate(f.releaseDate) })];
-      if (!f.comingSoon) parts.push(f.length && t("movie.min", { n: f.length }), f.attributeIds.filter((a) => a in formatLabels).map(formatLabel).join(", "));
+      if (!f.comingSoon) parts.push(f.length && t("movie.min", { n: f.length }), (f.attributeIds || []).filter((a) => a in formatLabels).map(formatLabel).join(", "));
       return parts.filter(Boolean).join(" · ");
     };
     const draw = () => {
@@ -1001,9 +1074,9 @@ const wz = {
   async format(body) {
     const formats = await this.fetch(`/api/${this.draft.country}/formats`);
     const film = this.draft.film;
-    const onFilm = film.comingSoon ? null : new Set(film.attributeIds);
-    const atCinema = new Set(this.draft.cinema.formats || []);
-    const reason = (f) => (!atCinema.has(f.id) ? t("format.notAtCinema") : onFilm && !onFilm.has(f.id) ? t("format.notForFilm") : "");
+    const onFilm = film.comingSoon || !film.attributeIds ? null : new Set(film.attributeIds);
+    const atCinema = this.draft.cinema.formats ? new Set(this.draft.cinema.formats) : null;
+    const reason = (f) => (atCinema && !atCinema.has(f.id) ? t("format.notAtCinema") : onFilm && !onFilm.has(f.id) ? t("format.notForFilm") : "");
     const items = [{ value: "", title: t("format.any"), meta: t("format.anyMeta") }].concat(
       formats
         .map((f) => ({ value: f.id, title: f.label, meta: reason(f), disabled: Boolean(reason(f)) }))
@@ -1067,7 +1140,8 @@ const wz = {
     };
     $("wz-next").disabled = true;
     try {
-      await api("/api/alerts", { method: "POST", body: JSON.stringify(payload) });
+      if (this.editing) await api(`/api/alerts/${this.editing}`, { method: "PUT", body: JSON.stringify(payload) });
+      else await api("/api/alerts", { method: "POST", body: JSON.stringify(payload) });
       this.close();
       await loadAlerts();
     } catch (e) {

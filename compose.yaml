@@ -1,0 +1,19 @@
+services:
+  watcher:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./appsettings.json:/app/appsettings.json
+      - ./data:/app/data
+
+  ui:
+    build: .
+    restart: unless-stopped
+    command: ["python", "src/serve.py", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      # Bound to localhost on purpose: the UI has no login. Reach it through an
+      # SSH tunnel or put an authenticating reverse proxy in front.
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./appsettings.json:/app/appsettings.json
+      - ./data:/app/data
